@@ -44,6 +44,7 @@ ROLE_CATALOG: dict[str, RoleConfig] = {
     "reviewer": RoleConfig(
         "reviewer", "gpt-5.6-luna", "medium", "read-only", 1200, 1,
         "Revisa implementacion, contrato, riesgos y evidencia; no edita archivos.",
+        ("result.json", "review-summary.json"),
     ),
     "ui-reviewer": RoleConfig(
         "ui-reviewer", "gpt-5.4", "medium", "read-only", 1200, 1,

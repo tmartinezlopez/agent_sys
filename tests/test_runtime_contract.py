@@ -10,6 +10,7 @@ from agent_sys.launcher import build_command
 from agent_sys.pipeline import run_pipeline, run_stage
 from agent_sys.spec_writer import build_prompt, change_name_for_run
 from agent_sys import test_runner
+from agent_sys import reviewer
 from agent_sys.tmux_runtime import TmuxRuntime
 
 
@@ -53,6 +54,19 @@ def test_test_runner_prompt_is_read_only() -> None:
     assert "PYTHONPATH=src pytest -q" in prompt
     assert "No modifiques" in prompt
     assert role_config("test-runner").sandbox == "read-only"
+
+
+def test_reviewer_prompt_is_structured_and_read_only() -> None:
+    prompt = reviewer.build_prompt("revisar", {
+        "git_root": "/tmp/project", "change_name": "agent-sys-x",
+        "implementer_result": "/tmp/implementer.json",
+        "test_runner_result": "/tmp/tests.json", "tasks_file": "/tmp/tasks.md",
+        "test_stdout": "/tmp/tests.log",
+    })
+    assert "AGENT_SYS_REVIEW: passed" in prompt
+    assert "AGENT_SYS_FINDING" in prompt
+    assert "No edites archivos" in prompt
+    assert role_config("reviewer").sandbox == "read-only"
 
 
 def test_test_runner_requires_implementer_handoff(tmp_path: Path) -> None:
@@ -225,7 +239,7 @@ def test_pipeline_runs_all_declared_stages(tmp_path: Path) -> None:
     project = prepare_valid_project(tmp_path)
     source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
     command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
-                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("ejecutar todo", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project, use_tmux=False)
     state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
@@ -279,3 +293,29 @@ def test_pipeline_stops_after_test_failure(tmp_path: Path) -> None:
     assert result["status"] == "failed"
     assert result["stopped_at"] == "test-runner"
     assert state["stages"]["reviewer"]["status"] == "blocked"
+
+
+def test_reviewer_blocking_finding_stops_later_stages(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
+    command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: blocked\\nAGENT_SYS_FINDING: critical|src/example.py|contrato roto\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
+    result = run_pipeline("bloquear review", runs_dir=tmp_path / "runs",
+                          codex_command=command, working_directory=project,
+                          use_tmux=False)
+    state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
+    assert result["status"] == "failed"
+    assert result["stopped_at"] == "reviewer"
+    assert state["stages"]["ui-reviewer"]["status"] == "blocked"
+
+
+def test_reviewer_rejects_checkout_mutation(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
+    command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'reviewed\\n' > review-mutated.txt; printf 'AGENT_SYS_REVIEW: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
+    result = run_pipeline("mutar review", runs_dir=tmp_path / "runs",
+                          codex_command=command, working_directory=project,
+                          use_tmux=False, stages=("spec-writer", "implementer", "test-runner", "reviewer"))
+    assert result["status"] == "failed"
+    assert result["stopped_at"] == "reviewer"

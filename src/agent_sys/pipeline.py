@@ -14,6 +14,7 @@ from .ledger import RunLedger, now, write_json
 from .implementer import build_prompt as build_implementer_prompt, evaluate as evaluate_implementer, validate_handoff
 from .spec_writer import build_prompt as build_spec_writer_prompt, evaluate as evaluate_spec_writer
 from .test_runner import build_prompt as build_test_runner_prompt, execute_tests, validate_handoff as validate_test_handoff
+from .reviewer import build_prompt as build_reviewer_prompt, evaluate as evaluate_reviewer, validate_handoff as validate_reviewer_handoff
 from .tmux_runtime import TmuxRuntime
 
 
@@ -59,6 +60,16 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
             ledger.record("stage_blocked", stage=role, reason=reason)
             return {"run_id": run_id, "stage": role, "status": "blocked", "reason": reason}
         prompt = build_test_runner_prompt(objective, handoff)
+    elif role == "reviewer":
+        handoff = validate_reviewer_handoff(ledger.state["stages"], working_directory or Path.cwd())
+        if not handoff["valid"]:
+            reason = handoff["error"]
+            ledger.transition(role, "blocked", reason=reason)
+            ledger.state["status"] = "blocked"
+            ledger._save()
+            ledger.record("stage_blocked", stage=role, reason=reason)
+            return {"run_id": run_id, "stage": role, "status": "blocked", "reason": reason}
+        prompt = build_reviewer_prompt(objective, handoff)
     else:
         prompt = (f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
                   f"Objetivo del run: {objective}\n"
@@ -112,6 +123,8 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
         evaluation = execute_tests(stage_dir, working_directory or Path.cwd(),
                                     timeout_seconds=timeout_seconds or config.timeout_seconds)
         write_json(stage_dir / "test-summary.json", evaluation)
+    elif result["exit_code"] == 0 and role == "reviewer":
+        evaluation = evaluate_reviewer(stage_dir, working_directory or Path.cwd(), handoff)
     status = "passed" if result["exit_code"] == 0 and evaluation.get("valid", True) else "failed"
     finished_at = now()
     result_document = {"run_id": run_id, "stage": role, "status": status, **result,
