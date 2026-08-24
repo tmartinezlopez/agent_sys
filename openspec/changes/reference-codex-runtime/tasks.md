@@ -1,35 +1,35 @@
 ## 1. Base del runtime y convenciones de rutas
 
-- [ ] 1.1 Crear la estructura mínima de `scripts/pipeline/`, `.pipeline/` y
+- [x] 1.1 Crear la estructura mínima de `scripts/pipeline/`, `.pipeline/` y
   configuración versionada del runtime, y verificar que `bash -n` pasa para
   todos los scripts públicos.
-- [ ] 1.2 Portar la convención única de paths para repo, worktree, rama,
+- [x] 1.2 Portar la convención única de paths para repo, worktree, rama,
   ventana tmux y directorio de runs, y verificarla con casos de nombres
   válidos, espacios y overrides explícitos.
-- [ ] 1.3 Implementar creación de worktree y rama `feature/<item>` sin lanzar
+- [x] 1.3 Implementar creación de worktree y rama `feature/<item>` sin lanzar
   agentes, y verificar que el checkout principal permanece limpio.
 
 ## 2. Ledger event-sourced
 
-- [ ] 2.1 Implementar inicialización de run con metadatos inmutables,
+- [x] 2.1 Implementar inicialización de run con metadatos inmutables,
   `events.jsonl`, puntero local y estado derivado; verificar creación,
   permisos y primer evento.
-- [ ] 2.2 Implementar escritura durable y validada de eventos, reconstrucción
+- [x] 2.2 Implementar escritura durable y validada de eventos, reconstrucción
   de estado, `show` y `summary`; verificar que un evento inválido no altera el
   ledger y que la reconstrucción es determinista.
-- [ ] 2.3 Implementar `resume-plan` read-only para derivar etapa completada,
+- [x] 2.3 Implementar `resume-plan` read-only para derivar etapa completada,
   etapa abierta, gate y etapa de reanudación; verificar que no modifica ningún
   archivo del run.
 
 ## 3. Adaptador Codex y contratos de etapa
 
-- [ ] 3.1 Declarar exactamente los seis roles y su configuración Codex en un
+- [x] 3.1 Declarar exactamente los seis roles y su configuración Codex en un
   único catálogo, y verificar que no se acepta un rol genérico ni un modelo
   ficticio.
-- [ ] 3.2 Implementar el wrapper de `codex exec` que persista comando, prompt,
+- [x] 3.2 Implementar el wrapper de `codex exec` que persista comando, prompt,
   stdout, stderr, exit code y resultado; verificar éxito, fallo, timeout y
   binario ausente.
-- [ ] 3.3 Implementar precondiciones de orden, gate y sandbox por etapa, y
+- [x] 3.3 Implementar precondiciones de orden, gate y sandbox por etapa, y
   verificar que un despacho fuera de orden no inicia Codex y deja evidencia.
 
 ## 4. Vertical slice spec → gate → implementer
