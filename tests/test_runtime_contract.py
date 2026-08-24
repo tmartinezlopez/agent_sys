@@ -9,6 +9,7 @@ from agent_sys.ledger import RunLedger
 from agent_sys.launcher import build_command
 from agent_sys.pipeline import run_pipeline, run_stage
 from agent_sys.spec_writer import build_prompt, change_name_for_run
+from agent_sys import test_runner
 from agent_sys.tmux_runtime import TmuxRuntime
 
 
@@ -43,6 +44,23 @@ def test_implementer_requires_spec_writer_handoff(tmp_path: Path) -> None:
                        runs_dir=tmp_path / "runs", codex_command=command, use_tmux=False)
     assert result["status"] == "blocked"
     assert result["reason"] == "spec-writer no está en estado passed"
+    assert not (tmp_path / "should-not-run").exists()
+
+
+def test_test_runner_prompt_is_read_only() -> None:
+    prompt = test_runner.build_prompt("validar", {"git_root": "/tmp/project",
+                                                   "change_name": "agent-sys-x"})
+    assert "PYTHONPATH=src pytest -q" in prompt
+    assert "No modifiques" in prompt
+    assert role_config("test-runner").sandbox == "read-only"
+
+
+def test_test_runner_requires_implementer_handoff(tmp_path: Path) -> None:
+    command = fake_codex(tmp_path, "touch should-not-run; exit 0\n")
+    result = run_stage("probar", role="test-runner", run_id="no-implementer",
+                       runs_dir=tmp_path / "runs", codex_command=command, use_tmux=False)
+    assert result["status"] == "blocked"
+    assert result["reason"] == "implementer no está en estado passed"
     assert not (tmp_path / "should-not-run").exists()
 
 
@@ -129,6 +147,9 @@ def prepare_valid_project(tmp_path: Path) -> Path:
                    stdout=subprocess.DEVNULL)
     subprocess.run(["git", "init", "-b", "main", str(project)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    (project / "src").mkdir()
+    (project / "tests").mkdir()
+    (project / "tests/test_generated.py").write_text("def test_generated():\n    assert True\n")
     return project
 
 
@@ -227,3 +248,34 @@ def test_implementer_stops_on_post_validation_failure(tmp_path: Path) -> None:
                           use_tmux=False, stages=("spec-writer", "implementer"))
     assert result["status"] == "failed"
     assert result["stopped_at"] == "implementer"
+
+
+def test_test_runner_records_pass_fail_and_timeout(tmp_path: Path, monkeypatch) -> None:
+    project = prepare_valid_project(tmp_path)
+    stage_dir = tmp_path / "stage"
+    passing = test_runner.execute_tests(stage_dir, project, timeout_seconds=5)
+    assert passing["valid"] is True
+    assert passing["exit_code"] == 0
+    (project / "tests/test_generated.py").write_text("def test_generated():\n    assert False\n")
+    failing = test_runner.execute_tests(stage_dir, project, timeout_seconds=5)
+    assert failing["valid"] is False
+    assert failing["exit_code"] != 0
+    monkeypatch.setattr(test_runner, "TEST_COMMAND", ["bash", "-c", "sleep 1"])
+    timed_out = test_runner.execute_tests(stage_dir, project, timeout_seconds=0.01)
+    assert timed_out["valid"] is False
+    assert timed_out["exit_code"] == 124
+
+
+def test_pipeline_stops_after_test_failure(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
+    command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; "
+                         "elif [[ \"$prompt\" == *test-runner* ]]; then printf 'def test_generated():\\n    assert False\\n' > tests/test_generated.py; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
+    result = run_pipeline("fallar pruebas", runs_dir=tmp_path / "runs",
+                          codex_command=command, working_directory=project,
+                          use_tmux=False)
+    state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
+    assert result["status"] == "failed"
+    assert result["stopped_at"] == "test-runner"
+    assert state["stages"]["reviewer"]["status"] == "blocked"

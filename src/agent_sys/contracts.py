@@ -39,6 +39,7 @@ ROLE_CATALOG: dict[str, RoleConfig] = {
     "test-runner": RoleConfig(
         "test-runner", "gpt-5.3-codex", "medium", "read-only", 900, 1,
         "Ejecuta las pruebas declaradas, registra comandos, resultados y fallos sin modificar el codigo.",
+        ("result.json", "tests.stdout.log", "tests.stderr.log", "test-summary.json"),
     ),
     "reviewer": RoleConfig(
         "reviewer", "gpt-5.6-luna", "medium", "read-only", 1200, 1,
