@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-STATES = ("pending", "running", "passed", "failed", "blocked")
+STATES = ("pending", "running", "passed", "failed", "blocked", "skipped")
 STAGES = ("spec-writer", "implementer", "test-runner", "reviewer", "ui-reviewer", "qa")
 
 
@@ -49,6 +49,7 @@ ROLE_CATALOG: dict[str, RoleConfig] = {
     "ui-reviewer": RoleConfig(
         "ui-reviewer", "gpt-5.4", "medium", "read-only", 1200, 1,
         "Revisa la interfaz solo cuando el change la afecta y registra evidencia visual o bloquea si falta.",
+        ("result.json", "ui-summary.json"),
     ),
     "qa": RoleConfig(
         "qa", "gpt-5.4", "medium", "read-only", 1200, 1,
@@ -68,11 +69,12 @@ def validate_transition(current: str, target: str) -> None:
     if current not in STATES or target not in STATES:
         raise ValueError(f"estado no valido: {current!r} -> {target!r}")
     allowed = {
-        "pending": {"running", "blocked"},
+        "pending": {"running", "blocked", "skipped"},
         "running": {"passed", "failed", "blocked"},
         "passed": set(),
         "failed": set(),
         "blocked": set(),
+        "skipped": set(),
     }
     if target not in allowed[current]:
         raise ValueError(f"transicion no permitida: {current!r} -> {target!r}")

@@ -62,12 +62,12 @@ Prerrequisitos: estado, tmux y lanzador Codex.
 
 Prerrequisito: primera ejecución completa.
 
-- [ ] Implementar `spec-writer` con OpenSpec real y probar sus artefactos.
+- [x] Implementar `spec-writer` con OpenSpec real y probar sus artefactos.
 - [ ] Implementar gate humano posterior al spec y persistir su decisión.
-- [ ] Implementar `implementer` y probar modificaciones en un worktree.
-- [ ] Implementar `test-runner` en solo lectura.
-- [ ] Implementar `reviewer` en solo lectura.
-- [ ] Implementar `ui-reviewer` como etapa condicional.
+- [x] Implementar `implementer` y probar modificaciones en un checkout.
+- [x] Implementar `test-runner` en solo lectura.
+- [x] Implementar `reviewer` en solo lectura.
+- [x] Implementar `ui-reviewer` como etapa condicional y no verificable sin bridge.
 - [ ] Implementar `qa` en solo lectura.
 
 ## 7. Recuperación y operación

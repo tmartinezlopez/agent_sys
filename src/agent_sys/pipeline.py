@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ from .implementer import build_prompt as build_implementer_prompt, evaluate as e
 from .spec_writer import build_prompt as build_spec_writer_prompt, evaluate as evaluate_spec_writer
 from .test_runner import build_prompt as build_test_runner_prompt, execute_tests, validate_handoff as validate_test_handoff
 from .reviewer import build_prompt as build_reviewer_prompt, evaluate as evaluate_reviewer, validate_handoff as validate_reviewer_handoff
+from .ui_reviewer import (affects_ui, build_prompt as build_ui_prompt,
+                          check_prerequisites, validate_handoff as validate_ui_handoff,
+                          write_unverifiable)
 from .tmux_runtime import TmuxRuntime
 
 
@@ -70,6 +74,28 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
             ledger.record("stage_blocked", stage=role, reason=reason)
             return {"run_id": run_id, "stage": role, "status": "blocked", "reason": reason}
         prompt = build_reviewer_prompt(objective, handoff)
+    elif role == "ui-reviewer":
+        handoff = validate_ui_handoff(ledger.state["stages"], working_directory or Path.cwd())
+        if not handoff["valid"]:
+            reason = handoff["error"]
+            ledger.transition(role, "blocked", reason=reason)
+            ledger.state["status"] = "blocked"
+            ledger._save()
+            ledger.record("stage_blocked", stage=role, reason=reason)
+            return {"run_id": run_id, "stage": role, "status": "blocked", "reason": reason}
+        base_url = os.environ.get("AGENT_SYS_UI_BASE_URL")
+        capability = check_prerequisites(working_directory or Path.cwd(),
+                                          base_url=base_url, codex_command=codex_command)
+        if not capability["available"]:
+            summary = write_unverifiable(stage_dir, capability["reason"], capability)
+            ledger.transition(role, "blocked", **summary)
+            ledger.state["status"] = "blocked"
+            ledger._save()
+            ledger.record("stage_blocked", stage=role, reason=capability["reason"],
+                          result_file=summary["summary_file"])
+            return {"run_id": run_id, "stage": role, "status": "blocked",
+                    "reason": capability["reason"], "result_file": summary["summary_file"]}
+        prompt = build_ui_prompt(objective, handoff, base_url)
     else:
         prompt = (f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
                   f"Objetivo del run: {objective}\n"
@@ -77,7 +103,9 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
     (stage_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
     predecessor = predecessor_for(role)
     predecessor_status = ledger.state["stages"].get(predecessor, {}).get("status") if predecessor else None
-    if predecessor is not None and predecessor_status != "passed":
+    predecessor_satisfied = predecessor_status == "passed" or (
+        predecessor == "ui-reviewer" and predecessor_status == "skipped")
+    if predecessor is not None and not predecessor_satisfied:
         reason = f"predecesora {predecessor} no superada"
         ledger.transition(role, "blocked", reason=reason)
         ledger.state["status"] = "blocked"
@@ -158,8 +186,23 @@ def run_pipeline(objective: str, *, runs_dir: Path = Path("runs"),
     for stage in stages:
         ledger.ensure_stage(stage, role_config(stage).to_dict())
     for index, stage in enumerate(stages):
+        if stage == "ui-reviewer":
+            changed = ledger.state["stages"].get("implementer", {}).get("changed_files", [])
+            change_dir = ledger.state["stages"].get("implementer", {}).get("change_dir")
+            change_text = ""
+            if change_dir:
+                proposal = Path(change_dir) / "proposal.md"
+                if proposal.is_file():
+                    change_text = proposal.read_text(encoding="utf-8")
+            if not affects_ui(changed, change_text):
+                ledger.transition(stage, "skipped", reason="el change no afecta a UI")
+                ledger.record("stage_skipped", stage=stage, reason="el change no afecta a UI")
+                continue
         predecessor = predecessor_for(stage)
-        if predecessor and ledger.state["stages"].get(predecessor, {}).get("status") != "passed":
+        predecessor_status = ledger.state["stages"].get(predecessor, {}).get("status") if predecessor else None
+        predecessor_satisfied = predecessor_status == "passed" or (
+            predecessor == "ui-reviewer" and predecessor_status == "skipped")
+        if predecessor and not predecessor_satisfied:
             reason = f"predecesora {predecessor} no superada"
             ledger.transition(stage, "blocked", reason=reason)
             for remaining in stages[index + 1:]:

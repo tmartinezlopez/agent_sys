@@ -17,7 +17,7 @@ artefactos dentro de `runs/<run_id>/stages/<stage_id>/`.
 Los estados son:
 
 ```text
-pending, running, passed, failed, blocked
+pending, running, passed, failed, blocked, skipped
 ```
 
 No se avanza si la etapa anterior no ha pasado o si falta un gate obligatorio.

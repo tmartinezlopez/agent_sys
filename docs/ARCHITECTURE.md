@@ -81,7 +81,8 @@ pending → running → passed
 ```
 
 Una etapa no avanza si la anterior no está `passed` o si falta un gate humano
-obligatorio.
+obligatorio. `ui-reviewer` puede quedar `skipped` cuando el cambio no afecta a
+la interfaz; si sí afecta y no existe bridge de navegador, queda bloqueado.
 
 ### Tmux
 
