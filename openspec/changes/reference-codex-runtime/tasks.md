@@ -34,9 +34,9 @@
 
 ## 4. Vertical slice spec → gate → implementer
 
-- [ ] 4.1 Lanzar `spec-writer` desde el worktree creado y validar sus artefactos
+- [x] 4.1 Lanzar `spec-writer` desde el worktree creado y validar sus artefactos
   OpenSpec reales; verificar el run con Codex en un proyecto temporal Git.
-- [ ] 4.2 Abrir y persistir el gate humano después de `spec-writer`, incluyendo
+- [x] 4.2 Abrir y persistir el gate humano después de `spec-writer`, incluyendo
   aprobación, cambios y descarte; verificar que `implementer` no se lanza con
   el gate pendiente o descartado.
 - [ ] 4.3 Implementar `new-feature.sh` para crear worktree, inicializar ledger
