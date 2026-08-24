@@ -6,8 +6,9 @@ ya esté completo.
 
 ## 0. Bootstrap
 
-- [ ] Resolver si este directorio se convierte en checkout Git o se sustituye
-  por un clon seguro. Verificar con `git rev-parse --show-toplevel`.
+- [x] Convertir este directorio en checkout Git y conservar el historial remoto
+  mediante `origin/main`. Evidencia: `git rev-parse --show-toplevel`, historial
+  local fusionado y ningún `push` realizado.
 - [x] Instalar e inicializar OpenSpec para Codex. Evidencia: `openspec doctor`
   devuelve `OpenSpec root: ok`.
 - [x] Verificar herramientas. Evidencia: OpenSpec `1.10.0`, Codex CLI
