@@ -6,7 +6,7 @@ from pathlib import Path
 from agent_sys.contracts import ROLE_CATALOG, STAGES, predecessor_for, role_config
 from agent_sys.ledger import RunLedger
 from agent_sys.launcher import build_command
-from agent_sys.pipeline import run_stage
+from agent_sys.pipeline import run_pipeline, run_stage
 from agent_sys.tmux_runtime import TmuxRuntime
 
 
@@ -79,3 +79,27 @@ def test_stage_process_runs_inside_owned_tmux_window(tmp_path: Path) -> None:
     finally:
         subprocess.run(["tmux", "-L", socket, "kill-server"], check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def test_pipeline_stops_after_failed_stage(tmp_path: Path) -> None:
+    command = fake_codex(tmp_path, "case=\"$*\"; [[ \"$case\" == *implementer* ]] && exit 7; exit 0\n")
+    result = run_pipeline("ejecutar pipeline", runs_dir=tmp_path / "runs",
+                          codex_command=command, use_tmux=False)
+    run_dir = tmp_path / "runs" / result["run_id"]
+    state = json.loads((run_dir / "run.json").read_text())
+    assert result["status"] == "failed"
+    assert state["stages"]["spec-writer"]["status"] == "passed"
+    assert state["stages"]["implementer"]["status"] == "failed"
+    assert state["stages"]["test-runner"]["status"] == "blocked"
+    assert not (run_dir / "stages/test-runner/stdout.log").exists()
+    assert any(json.loads(line)["type"] == "pipeline_stopped"
+               for line in (run_dir / "events.jsonl").read_text().splitlines())
+
+
+def test_pipeline_runs_all_declared_stages(tmp_path: Path) -> None:
+    command = fake_codex(tmp_path, "exit 0\n")
+    result = run_pipeline("ejecutar todo", runs_dir=tmp_path / "runs",
+                          codex_command=command, use_tmux=False)
+    state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
+    assert result["status"] == "passed"
+    assert all(stage["status"] == "passed" for stage in state["stages"].values())

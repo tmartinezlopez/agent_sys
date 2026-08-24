@@ -27,8 +27,8 @@
 ## 6. Coordinator vertical slice
 
 - [x] 6.1 Connect one configured stage to the tmux runtime, launcher and ledger, and verify an observable passed run from the coordinator entry point
-- [ ] 6.2 Verify that a failed or blocked stage prevents its successor from launching and records the stopping reason
+- [x] 6.2 Verify that a failed or blocked stage prevents its successor from launching and records the stopping reason
 
 ## 7. Handoff to role implementation
 
-- [ ] 7.1 Document the next change as the real `spec-writer` stage using OpenSpec, with no generic-agent fallback, and verify the runtime contract exposes the inputs and artefacts it requires
+- [x] 7.1 Document the next change as the real `spec-writer` stage using OpenSpec, with no generic-agent fallback, and verify the runtime contract exposes the inputs and artefacts it requires

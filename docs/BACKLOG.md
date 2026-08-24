@@ -56,7 +56,7 @@ Prerrequisitos: estado, tmux y lanzador Codex.
 
 - [x] Lanzar una etapa desde el coordinador dentro de una ventana tmux.
 - [x] Registrar inicio, finalización, resultado y artefactos.
-- [ ] Verificar que una etapa fallida impide lanzar la siguiente.
+- [x] Verificar que una etapa fallida impide lanzar la siguiente.
 
 ## 6. Roles
 

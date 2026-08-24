@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .contracts import predecessor_for, role_config
+from .contracts import STAGES, predecessor_for, role_config
 from .launcher import build_command, execute
 from .ledger import RunLedger, now, write_json
 from .tmux_runtime import TmuxRuntime
@@ -22,11 +22,12 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
               run_id: str | None = None, codex_command: str = "codex",
               profile: str | None = None, working_directory: Path | None = None,
               timeout_seconds: float | None = None, tmux_session: str = "agent-sys",
-              tmux_command: str = "tmux", use_tmux: bool = True) -> dict[str, Any]:
+              tmux_command: str = "tmux", use_tmux: bool = True,
+              _ledger: RunLedger | None = None) -> dict[str, Any]:
     """Ejecuta una etapa declarada; el resultado queda reconstruible en disco."""
     config = role_config(role)
-    run_id = run_id or new_run_id()
-    ledger = RunLedger(runs_dir / run_id, run_id, objective)
+    run_id = _ledger.run_id if _ledger else (run_id or new_run_id())
+    ledger = _ledger or RunLedger(runs_dir / run_id, run_id, objective)
     stage_dir = ledger.run_dir / "stages" / role
     stage_dir.mkdir(parents=True, exist_ok=True)
     prompt = (f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
@@ -35,7 +36,8 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
     (stage_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
     ledger.ensure_stage(role, config.to_dict())
     predecessor = predecessor_for(role)
-    if predecessor is not None:
+    predecessor_status = ledger.state["stages"].get(predecessor, {}).get("status") if predecessor else None
+    if predecessor is not None and predecessor_status != "passed":
         reason = f"predecesora {predecessor} no superada"
         ledger.transition(role, "blocked", reason=reason)
         ledger.state["status"] = "blocked"
@@ -81,6 +83,49 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
                   result_file=str(stage_dir / "result.json"))
     return {"run_id": run_id, "stage": role, "status": status, **result,
             "result_file": str(stage_dir / "result.json")}
+
+
+def run_pipeline(objective: str, *, runs_dir: Path = Path("runs"),
+                 codex_command: str = "codex", profile: str | None = None,
+                 working_directory: Path | None = None, timeout_seconds: float | None = None,
+                 tmux_session: str = "agent-sys", tmux_command: str = "tmux",
+                 use_tmux: bool = True, stages: tuple[str, ...] = STAGES) -> dict[str, Any]:
+    """Ejecuta las etapas declaradas en orden y detiene el run ante un fallo."""
+    unknown = set(stages) - set(STAGES)
+    if unknown:
+        raise ValueError(f"etapas no declaradas: {sorted(unknown)}")
+    run_id = new_run_id()
+    ledger = RunLedger(runs_dir / run_id, run_id, objective)
+    for stage in stages:
+        ledger.ensure_stage(stage, role_config(stage).to_dict())
+    for index, stage in enumerate(stages):
+        predecessor = predecessor_for(stage)
+        if predecessor and ledger.state["stages"].get(predecessor, {}).get("status") != "passed":
+            reason = f"predecesora {predecessor} no superada"
+            ledger.transition(stage, "blocked", reason=reason)
+            for remaining in stages[index + 1:]:
+                ledger.transition(remaining, "blocked", reason=f"pipeline detenido: {reason}")
+            ledger.state["status"] = "blocked"
+            ledger._save()
+            ledger.record("pipeline_stopped", stage=stage, status="blocked", reason=reason)
+            return {"run_id": run_id, "status": "blocked", "stopped_at": stage, "reason": reason}
+        result = run_stage(objective, role=stage, run_id=run_id, codex_command=codex_command,
+                           profile=profile, working_directory=working_directory,
+                           timeout_seconds=timeout_seconds, tmux_session=tmux_session,
+                           tmux_command=tmux_command, use_tmux=use_tmux, _ledger=ledger)
+        if result["status"] != "passed":
+            reason = f"etapa {stage} terminó en {result['status']}"
+            for remaining in stages[index + 1:]:
+                ledger.transition(remaining, "blocked", reason=reason)
+            ledger.state["status"] = result["status"]
+            ledger._save()
+            ledger.record("pipeline_stopped", stage=stage, status=result["status"], reason=reason)
+            return {"run_id": run_id, "status": result["status"], "stopped_at": stage,
+                    "reason": reason}
+    ledger.state["status"] = "passed"
+    ledger._save()
+    ledger.record("pipeline_finished", status="passed", stages=list(stages))
+    return {"run_id": run_id, "status": "passed", "stages": list(stages)}
 
 
 def run_once(prompt: str, *, runs_dir: Path = Path("runs"), run_id: str | None = None,
