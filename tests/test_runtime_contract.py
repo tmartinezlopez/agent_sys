@@ -37,6 +37,15 @@ def test_spec_writer_prompt_is_specific() -> None:
     assert change_name_for_run("RUN-123") == "agent-sys-run-123"
 
 
+def test_implementer_requires_spec_writer_handoff(tmp_path: Path) -> None:
+    command = fake_codex(tmp_path, "touch should-not-run; exit 0\n")
+    result = run_stage("implementar", role="implementer", run_id="no-handoff",
+                       runs_dir=tmp_path / "runs", codex_command=command, use_tmux=False)
+    assert result["status"] == "blocked"
+    assert result["reason"] == "spec-writer no está en estado passed"
+    assert not (tmp_path / "should-not-run").exists()
+
+
 def test_launcher_records_real_role_flags() -> None:
     command = build_command(role_config("reviewer"), "revisa esto", working_directory=Path("/tmp"))
     assert command[:6] == ["codex", "exec", "--json", "--sandbox", "read-only", "--model"]
@@ -104,6 +113,8 @@ def prepare_valid_change(tmp_path: Path, name: str) -> Path:
     subprocess.run(["openspec", "init", "--tools", "codex", "--no-animation",
                     "--no-copilot-cloud", str(project)], check=True,
                    stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "init", "-b", "main", str(project)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
     target = project / "openspec/changes" / name
     shutil.copytree(source, target)
@@ -116,6 +127,8 @@ def prepare_valid_project(tmp_path: Path) -> Path:
     subprocess.run(["openspec", "init", "--tools", "codex", "--no-animation",
                     "--no-copilot-cloud", str(project)], check=True,
                    stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "init", "-b", "main", str(project)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return project
 
 
@@ -191,9 +204,26 @@ def test_pipeline_runs_all_declared_stages(tmp_path: Path) -> None:
     project = prepare_valid_project(tmp_path)
     source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
     command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
-                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; fi; exit 0\n")
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("ejecutar todo", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project, use_tmux=False)
     state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
     assert result["status"] == "passed"
     assert all(stage["status"] == "passed" for stage in state["stages"].values())
+    implementer = state["stages"]["implementer"]
+    assert implementer["tasks_file"].endswith("tasks.md")
+    assert implementer["change_name"].startswith("agent-sys-")
+    assert (project / "implementado.txt").read_text() == "implementado\n"
+
+
+def test_implementer_stops_on_post_validation_failure(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
+    command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; "
+                         "else printf 'implementado\\n' > implementado.txt; spec=$(find openspec/changes -name spec.md | head -1); sed -i 's/^#### Scenario:/### Scenario:/' \"$spec\"; fi; exit 0\n")
+    result = run_pipeline("invalidar implementacion", runs_dir=tmp_path / "runs",
+                          codex_command=command, working_directory=project,
+                          use_tmux=False, stages=("spec-writer", "implementer"))
+    assert result["status"] == "failed"
+    assert result["stopped_at"] == "implementer"

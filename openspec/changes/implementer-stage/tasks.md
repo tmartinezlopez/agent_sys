@@ -1,21 +1,21 @@
 ## 1. Contrato y entrada
 
-- [ ] 1.1 Añadir el prompt específico de `implementer` con change, tasks,
+- [x] 1.1 Añadir el prompt específico de `implementer` con change, tasks,
   checkout y restricciones, y verificar que no usa un prompt genérico
-- [ ] 1.2 Implementar la lectura y validación del handoff de `spec-writer`, y
+- [x] 1.2 Implementar la lectura y validación del handoff de `spec-writer`, y
   verificar que un handoff ausente bloquea antes de lanzar Codex
 
 ## 2. Ejecución y evidencia
 
-- [ ] 2.1 Persistir el prompt, change, tasks, checkout y archivos modificados,
+- [x] 2.1 Persistir el prompt, change, tasks, checkout y archivos modificados,
   y verificar que el resultado queda reconstruible desde el run
-- [ ] 2.2 Ejecutar la validación estricta posterior y verificar los casos de
+- [x] 2.2 Ejecutar la validación estricta posterior y verificar los casos de
   implementación correcta, fallo de Codex y validación fallida
 
 ## 3. Integración
 
-- [ ] 3.1 Conectar `implementer` al resultado de `spec-writer` dentro del mismo
+- [x] 3.1 Conectar `implementer` al resultado de `spec-writer` dentro del mismo
   run y verificar un handoff completo sin memoria implícita
-- [ ] 3.2 Ejecutar el pipeline temporal `spec-writer → implementer`, verificar
+- [x] 3.2 Ejecutar el pipeline temporal `spec-writer → implementer`, verificar
   que implementer modifica el checkout de prueba y dejar el resultado listo
   para `test-runner`

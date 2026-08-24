@@ -11,6 +11,7 @@ from uuid import uuid4
 from .contracts import STAGES, predecessor_for, role_config
 from .launcher import build_command, execute
 from .ledger import RunLedger, now, write_json
+from .implementer import build_prompt as build_implementer_prompt, evaluate as evaluate_implementer, validate_handoff
 from .spec_writer import build_prompt as build_spec_writer_prompt, evaluate as evaluate_spec_writer
 from .tmux_runtime import TmuxRuntime
 
@@ -31,12 +32,26 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
     ledger = _ledger or RunLedger(runs_dir / run_id, run_id, objective)
     stage_dir = ledger.run_dir / "stages" / role
     stage_dir.mkdir(parents=True, exist_ok=True)
-    prompt = (build_spec_writer_prompt(objective, run_id) if role == "spec-writer" else
-              f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
-              f"Objetivo del run: {objective}\n"
-              "Escribe tu resultado final de forma concisa y cita los artefactos creados.")
-    (stage_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
     ledger.ensure_stage(role, config.to_dict())
+    handoff: dict[str, Any] = {}
+    if role == "spec-writer":
+        prompt = build_spec_writer_prompt(objective, run_id)
+    elif role == "implementer":
+        handoff = validate_handoff(ledger.state["stages"].get("spec-writer", {}),
+                                   working_directory or Path.cwd())
+        if not handoff["valid"]:
+            reason = handoff["error"]
+            ledger.transition(role, "blocked", reason=reason)
+            ledger.state["status"] = "blocked"
+            ledger._save()
+            ledger.record("stage_blocked", stage=role, reason=reason)
+            return {"run_id": run_id, "stage": role, "status": "blocked", "reason": reason}
+        prompt = build_implementer_prompt(objective, handoff)
+    else:
+        prompt = (f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
+                  f"Objetivo del run: {objective}\n"
+                  "Escribe tu resultado final de forma concisa y cita los artefactos creados.")
+    (stage_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
     predecessor = predecessor_for(role)
     predecessor_status = ledger.state["stages"].get(predecessor, {}).get("status") if predecessor else None
     if predecessor is not None and predecessor_status != "passed":
@@ -56,6 +71,11 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
     stage.update({"prompt_file": str(stage_dir / "prompt.md"), "command": command,
                   "tmux_window": window if use_tmux else None,
                   "working_directory": str(working_directory) if working_directory else None})
+    if handoff:
+        stage.update({"change_name": handoff["change_name"],
+                      "change_dir": handoff["change_dir"],
+                      "tasks_file": handoff["tasks_file"],
+                      "git_root": handoff["git_root"]})
     ledger._save()
     ledger.record("stage_command_recorded", stage=role, command=command,
                   model=config.model, reasoning=config.reasoning, sandbox=config.sandbox,
@@ -73,6 +93,9 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
     evaluation: dict[str, Any] = {}
     if result["exit_code"] == 0 and role == "spec-writer":
         evaluation = evaluate_spec_writer(stage_dir, working_directory or Path.cwd(), run_id)
+    elif result["exit_code"] == 0 and role == "implementer":
+        evaluation = evaluate_implementer(stage_dir, working_directory or Path.cwd(),
+                                           handoff["change_name"])
     status = "passed" if result["exit_code"] == 0 and evaluation.get("valid", True) else "failed"
     finished_at = now()
     result_document = {"run_id": run_id, "stage": role, "status": status, **result,
