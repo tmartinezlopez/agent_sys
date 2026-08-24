@@ -29,7 +29,8 @@ class RoleConfig:
 ROLE_CATALOG: dict[str, RoleConfig] = {
     "spec-writer": RoleConfig(
         "spec-writer", "gpt-5.6-luna", "medium", "workspace-write", 900, 1,
-        "Define el change OpenSpec, sus requisitos verificables y artefactos de entrada para implementacion.",
+        "Crea y valida un change OpenSpec real con proposal, specs, design y tasks; no implementa codigo de producto.",
+        ("result.json", "proposal.md", "design.md", "tasks.md", "specs/*.md"),
     ),
     "implementer": RoleConfig(
         "implementer", "gpt-5.4", "medium", "workspace-write", 1800, 1,

@@ -11,6 +11,7 @@ from uuid import uuid4
 from .contracts import STAGES, predecessor_for, role_config
 from .launcher import build_command, execute
 from .ledger import RunLedger, now, write_json
+from .spec_writer import build_prompt as build_spec_writer_prompt, evaluate as evaluate_spec_writer
 from .tmux_runtime import TmuxRuntime
 
 
@@ -30,7 +31,8 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
     ledger = _ledger or RunLedger(runs_dir / run_id, run_id, objective)
     stage_dir = ledger.run_dir / "stages" / role
     stage_dir.mkdir(parents=True, exist_ok=True)
-    prompt = (f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
+    prompt = (build_spec_writer_prompt(objective, run_id) if role == "spec-writer" else
+              f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
               f"Objetivo del run: {objective}\n"
               "Escribe tu resultado final de forma concisa y cita los artefactos creados.")
     (stage_dir / "prompt.md").write_text(prompt + "\n", encoding="utf-8")
@@ -68,13 +70,18 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
         result = execute(command, cwd=working_directory,
                          stdout_path=stage_dir / "stdout.log", stderr_path=stage_dir / "stderr.log",
                          timeout_seconds=timeout_seconds or config.timeout_seconds)
-    status = "passed" if result["exit_code"] == 0 else "failed"
+    evaluation: dict[str, Any] = {}
+    if result["exit_code"] == 0 and role == "spec-writer":
+        evaluation = evaluate_spec_writer(stage_dir, working_directory or Path.cwd(), run_id)
+    status = "passed" if result["exit_code"] == 0 and evaluation.get("valid", True) else "failed"
     finished_at = now()
     result_document = {"run_id": run_id, "stage": role, "status": status, **result,
+                       **evaluation,
                        "finished_at": finished_at, "stdout_file": str(stage_dir / "stdout.log"),
                        "stderr_file": str(stage_dir / "stderr.log")}
     write_json(stage_dir / "result.json", result_document)
     fields = {k: v for k, v in result.items() if k not in ("stdout", "stderr")}
+    fields.update(evaluation)
     ledger.transition(role, status, **fields, result_file=str(stage_dir / "result.json"),
                       finished_at=finished_at)
     ledger.state["status"] = status
