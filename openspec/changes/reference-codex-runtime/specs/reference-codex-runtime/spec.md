@@ -1,0 +1,126 @@
+## Purpose
+
+Define un runtime aislado y auditable que conserve el ciclo operativo del
+sistema de referencia y sustituya sus ejecutores Claude por procesos Codex CLI.
+
+## ADDED Requirements
+
+### Requirement: Una feature se ejecuta en un worktree propio
+
+El runtime SHALL crear cada feature en un worktree Git y una rama
+`feature/<item>` antes de iniciar cualquier agente que pueda escribir. El
+checkout desde el que se lanza el comando y la rama principal SHALL permanecer
+sin modificaciones durante la ejecución de la feature.
+
+#### Scenario: Creación de una feature nueva
+
+- **WHEN** el operador lanza una feature con un item y una descripción
+- **THEN** el runtime crea el worktree, la rama de feature y una ubicación
+  identificable para su run antes de lanzar `spec-writer`
+
+#### Scenario: El worktree no puede crearse
+
+- **WHEN** Git rechaza la creación del worktree o la rama
+- **THEN** el runtime termina antes de lanzar Codex y devuelve un error
+  observable sin crear un run parcialmente ejecutable
+
+### Requirement: El run tiene un ledger único y reconstruible
+
+Cada ejecución SHALL tener un `run_id` único y un ledger en el worktree con
+metadatos inmutables, eventos append-only y estado derivado. Las operaciones de
+consulta SHALL reconstruir el estado desde el ledger y no desde memoria del
+proceso coordinador.
+
+#### Scenario: Run inicializado
+
+- **WHEN** se crea una feature ejecutable
+- **THEN** existe un run con `run.json`, `events.jsonl` y estado derivado, y el
+  primer evento identifica la creación del run
+
+#### Scenario: Consulta no mutante
+
+- **WHEN** el operador consulta status, logs, salud o informe
+- **THEN** la consulta devuelve datos del ledger sin añadir eventos ni cambiar
+  el estado persistido
+
+### Requirement: Codex se despacha sólo con roles declarados y en orden
+
+El runtime SHALL lanzar procesos externos mediante `codex exec` usando uno de
+los roles declarados del pipeline y SHALL impedir el uso de agentes genéricos
+como sustitutos de una etapa. El orden aplicable SHALL ser
+`spec-writer → implementer → test-runner → reviewer → ui-reviewer → qa`, con
+`ui-reviewer` sólo cuando el cambio afecte a la interfaz.
+
+#### Scenario: Despacho del vertical slice inicial
+
+- **WHEN** un run nuevo supera sus precondiciones
+- **THEN** se lanza `spec-writer` con su contrato Codex y no se lanza
+  `implementer` antes de completar el gate del spec
+
+#### Scenario: Intento fuera de orden
+
+- **WHEN** se solicita una etapa cuya predecesora no ha terminado o cuyo rol no
+  pertenece al catálogo
+- **THEN** el runtime bloquea el despacho, registra la razón y no inicia Codex
+
+### Requirement: El gate humano controla el paso a implementación
+
+Después de un `spec-writer` correcto, el runtime SHALL abrir un gate humano
+pendiente y SHALL detener el pipeline hasta una decisión explícita. La
+decisión SHALL indicar aprobación, cambios o descarte y quedar registrada con
+operador, motivo y timestamp.
+
+#### Scenario: Gate pendiente
+
+- **WHEN** `spec-writer` termina correctamente
+- **THEN** el ledger contiene un gate pendiente y `implementer` permanece sin
+  despachar
+
+#### Scenario: Aprobación del gate
+
+- **WHEN** el operador aprueba el gate del spec
+- **THEN** el ledger registra la aprobación y el runtime puede despachar
+  `implementer` en el mismo run y worktree
+
+#### Scenario: Cambios o descarte
+
+- **WHEN** el operador solicita cambios o descarta la especificación
+- **THEN** el runtime no despacha `implementer`, conserva la decisión y deja el
+  run en un estado que pueda inspeccionarse
+
+### Requirement: Un run puede reanudarse sin duplicar trabajo completado
+
+La reanudación SHALL derivar la primera etapa pendiente o abierta desde el
+ledger, SHALL reutilizar el mismo `run_id` y SHALL registrar un evento de
+reanudación. No SHALL repetir etapas ya completadas ni volver a pedir un gate ya
+aprobado.
+
+#### Scenario: Reanudación después de aprobar el gate
+
+- **WHEN** un run tiene `spec-writer` completado y el gate aprobado
+- **THEN** la reanudación inicia en `implementer`, conserva el `run_id` y no
+  vuelve a ejecutar `spec-writer`
+
+#### Scenario: Run muerto a mitad de etapa
+
+- **WHEN** existe un despacho sin evento de finalización
+- **THEN** el plan de reanudación identifica esa etapa como abierta y no la
+  declara completada por defecto
+
+### Requirement: La integración requiere revisión humana
+
+El runtime SHALL dejar el trabajo en la rama de feature para revisión humana y
+NO SHALL ejecutar merge o push automáticamente. La integración y limpieza del
+worktree SHALL ser operaciones separadas del pipeline de agentes.
+
+#### Scenario: Run terminado
+
+- **WHEN** todas las etapas aplicables terminan correctamente
+- **THEN** el runtime registra el cierre y deja disponible el diff de la rama
+  para revisión humana
+
+#### Scenario: Intento de publicación automática
+
+- **WHEN** una etapa o el coordinador intenta hacer merge a la rama principal o
+  publicar en GitHub
+- **THEN** la operación se rechaza y el run conserva su evidencia
