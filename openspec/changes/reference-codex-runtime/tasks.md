@@ -39,9 +39,9 @@
 - [x] 4.2 Abrir y persistir el gate humano después de `spec-writer`, incluyendo
   aprobación, cambios y descarte; verificar que `implementer` no se lanza con
   el gate pendiente o descartado.
-- [ ] 4.3 Implementar `new-feature.sh` para crear worktree, inicializar ledger
+- [x] 4.3 Implementar `new-feature.sh` para crear worktree, inicializar ledger
   y lanzar el slice con tmux opcional; verificar fallback foreground sin tmux.
-- [ ] 4.4 Implementar `resume-run.sh` sobre el mismo `run_id` y worktree,
+- [x] 4.4 Implementar `resume-run.sh` sobre el mismo `run_id` y worktree,
   respetando gates y evitando repetir etapas completadas; verificar una
   reanudación real desde `implementer`.
 
