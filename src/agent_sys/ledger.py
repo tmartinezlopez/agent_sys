@@ -34,6 +34,7 @@ class RunLedger:
             "created_at": timestamp,
             "updated_at": timestamp,
             "stages": {},
+            "gates": {},
         }
         self._save()
         self.record("run_created", status="pending")
@@ -47,6 +48,7 @@ class RunLedger:
         ledger.run_path = run_dir / "run.json"
         ledger.events_path = run_dir / "events.jsonl"
         ledger.state = state
+        ledger.state.setdefault("gates", {})
         return ledger
 
     def _save(self) -> None:
@@ -72,3 +74,29 @@ class RunLedger:
         self._save()
         self.record("stage_transition", stage=stage, from_status=current, status=target, **fields)
 
+    def create_gate(self, name: str, **fields: Any) -> dict[str, Any]:
+        gates = self.state.setdefault("gates", {})
+        if name in gates:
+            return gates[name]
+        gate = {"name": name, "status": "pending", "created_at": now(), **fields}
+        gates[name] = gate
+        self._save()
+        self.record("gate_created", gate=name, status="pending", **fields)
+        return gate
+
+    def decide_gate(self, name: str, decision: str, *, operator: str,
+                    reason: str | None = None) -> dict[str, Any]:
+        if decision not in ("approve", "reject"):
+            raise ValueError("decisión de gate no válida: use approve o reject")
+        gate = self.state.setdefault("gates", {}).get(name)
+        if gate is None:
+            raise ValueError(f"gate desconocido: {name}")
+        if gate.get("status") != "pending":
+            raise ValueError(f"gate {name} ya está decidido: {gate['status']}")
+        gate.update({"status": "approved" if decision == "approve" else "rejected",
+                     "decision": decision, "operator": operator,
+                     "reason": reason, "decided_at": now()})
+        self._save()
+        self.record("gate_decided", gate=name, status=gate["status"],
+                    decision=decision, operator=operator, reason=reason)
+        return gate

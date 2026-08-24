@@ -81,8 +81,20 @@ pending → running → passed
 ```
 
 Una etapa no avanza si la anterior no está `passed` o si falta un gate humano
-obligatorio. `ui-reviewer` puede quedar `skipped` cuando el cambio no afecta a
-la interfaz; si sí afecta y no existe bridge de navegador, queda bloqueado.
+obligatorio. Después de `spec-writer`, el gate `spec-review` queda pendiente y
+el operador debe aprobarlo o rechazarlo desde la CLI. Una aprobación reanuda el
+mismo `run_id` desde `implementer`; un rechazo bloquea las etapas restantes.
+`ui-reviewer` puede quedar `skipped` cuando el cambio no afecta a la interfaz;
+si sí afecta y no existe bridge de navegador, queda bloqueado. `qa` es la
+última etapa: necesita la evidencia completa y solo aprueba con una decisión
+estructurada y el checkout sin mutaciones.
+
+Ejemplo de decisión del operador:
+
+```bash
+PYTHONPATH=src python3 -m agent_sys.cli --gate spec-review \
+  --run-id <run_id> --decision approve --operator tomas
+```
 
 ### Tmux
 

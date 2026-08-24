@@ -4,19 +4,24 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from agent_sys.contracts import ROLE_CATALOG, STAGES, predecessor_for, role_config
 from agent_sys.ledger import RunLedger
 from agent_sys.launcher import build_command
-from agent_sys.pipeline import run_pipeline, run_stage
+from agent_sys.operations import inspect_run, read_logs, status_runs
+from agent_sys.pipeline import resume_run, run_pipeline, run_stage
 from agent_sys.spec_writer import build_prompt, change_name_for_run
 from agent_sys import test_runner
 from agent_sys import reviewer
 from agent_sys import ui_reviewer
+from agent_sys import qa
 from agent_sys.tmux_runtime import TmuxRuntime
 
 
 def fake_codex(tmp_path: Path, body: str) -> str:
     path = tmp_path / "fake-codex"
+    body = body.replace("exit 0\\n", "exit 0\n")
     path.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return str(path)
@@ -76,6 +81,17 @@ def test_ui_reviewer_detects_scope_and_never_fakes_browser() -> None:
     result = ui_reviewer.check_prerequisites(Path.cwd(), base_url="http://127.0.0.1:9")
     assert result["available"] is False
     assert "NO_VERIFICABLE" in result["reason"]
+
+
+def test_qa_prompt_is_structured_and_read_only() -> None:
+    prompt = qa.build_prompt("entregar", {
+        "git_root": "/tmp/project", "ui_status": "skipped",
+        "evidence": {"reviewer": "/tmp/reviewer.json"},
+    })
+    assert "AGENT_SYS_QA: passed" in prompt
+    assert "AGENT_SYS_QA_FINDING" in prompt
+    assert "No edites archivos" in prompt
+    assert role_config("qa").sandbox == "read-only"
 
 
 def test_test_runner_requires_implementer_handoff(tmp_path: Path) -> None:
@@ -232,7 +248,8 @@ def test_pipeline_stops_after_failed_stage(tmp_path: Path) -> None:
                          f"mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; "
                          "[[ \"$prompt\" == *implementer* ]] && exit 7; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; exit 0\n")
     result = run_pipeline("ejecutar pipeline", runs_dir=tmp_path / "runs",
-                          codex_command=command, working_directory=project, use_tmux=False)
+                          codex_command=command, working_directory=project, use_tmux=False,
+                          spec_gate_decision="approve", gate_operator="test")
     run_dir = tmp_path / "runs" / result["run_id"]
     state = json.loads((run_dir / "run.json").read_text())
     assert result["status"] == "failed"
@@ -244,13 +261,54 @@ def test_pipeline_stops_after_failed_stage(tmp_path: Path) -> None:
                for line in (run_dir / "events.jsonl").read_text().splitlines())
 
 
+def test_spec_gate_pauses_and_resume_keeps_run_id(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
+    command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; "
+                         f"elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: passed\\n'; elif [[ \"$prompt\" == *'Rol: qa'* ]]; then printf 'AGENT_SYS_QA: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\\n")
+    paused = run_pipeline("gatear", runs_dir=tmp_path / "runs", codex_command=command,
+                          working_directory=project, use_tmux=False)
+    run_dir = tmp_path / "runs" / paused["run_id"]
+    state = json.loads((run_dir / "run.json").read_text())
+    assert paused["status"] == "blocked"
+    assert state["gates"]["spec-review"]["status"] == "pending"
+    assert state["stages"]["implementer"]["status"] == "pending"
+    resumed = resume_run(paused["run_id"], runs_dir=tmp_path / "runs", decision="approve",
+                         operator="tomas", codex_command=command,
+                         working_directory=project, use_tmux=False)
+    assert resumed["status"] == "passed"
+    final_state = json.loads((run_dir / "run.json").read_text())
+    assert final_state["run_id"] == paused["run_id"]
+    assert final_state["gates"]["spec-review"]["status"] == "approved"
+    assert final_state["stages"]["spec-writer"]["status"] == "passed"
+
+
+def test_spec_gate_rejects_and_cannot_be_decided_twice(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
+    command = fake_codex(tmp_path, f"mkdir -p openspec/changes/gate; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/gate/; cp -r {source}/specs openspec/changes/gate/; printf 'AGENT_SYS_CHANGE: gate\\n'; exit 0\\n")
+    paused = run_pipeline("rechazar", runs_dir=tmp_path / "runs", codex_command=command,
+                          working_directory=project, use_tmux=False)
+    rejected = resume_run(paused["run_id"], runs_dir=tmp_path / "runs", decision="reject",
+                          operator="tomas", reason="alcance incorrecto", use_tmux=False)
+    assert rejected["status"] == "blocked"
+    state = json.loads((tmp_path / "runs" / paused["run_id"] / "run.json").read_text())
+    assert state["gates"]["spec-review"]["status"] == "rejected"
+    assert state["stages"]["implementer"]["status"] == "blocked"
+    with pytest.raises(ValueError, match="ya está decidido"):
+        resume_run(paused["run_id"], runs_dir=tmp_path / "runs", decision="approve",
+                   operator="tomas", use_tmux=False)
+
+
 def test_pipeline_runs_all_declared_stages(tmp_path: Path) -> None:
     project = prepare_valid_project(tmp_path)
     source = Path(__file__).parents[1] / "openspec/changes/spec-writer-stage"
     command = fake_codex(tmp_path, f"prompt=\"$*\"; name=$(printf '%s' \"$prompt\" | sed -n 's/.*Nombre exacto del change: \\([^ ]*\\).*/\\1/p'); "
-                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
+                         f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: passed\\n'; elif [[ \"$prompt\" == *'Rol: qa'* ]]; then printf 'AGENT_SYS_QA: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("ejecutar todo", runs_dir=tmp_path / "runs",
-                          codex_command=command, working_directory=project, use_tmux=False)
+                          codex_command=command, working_directory=project, use_tmux=False,
+                          spec_gate_decision="approve", gate_operator="test")
     state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
     assert result["status"] == "passed"
     assert all(stage["status"] == "passed" for name, stage in state["stages"].items()
@@ -270,7 +328,8 @@ def test_implementer_stops_on_post_validation_failure(tmp_path: Path) -> None:
                          "else printf 'implementado\\n' > implementado.txt; spec=$(find openspec/changes -name spec.md | head -1); sed -i 's/^#### Scenario:/### Scenario:/' \"$spec\"; fi; exit 0\n")
     result = run_pipeline("invalidar implementacion", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project,
-                          use_tmux=False, stages=("spec-writer", "implementer"))
+                          use_tmux=False, stages=("spec-writer", "implementer"),
+                          spec_gate_decision="approve", gate_operator="test")
     assert result["status"] == "failed"
     assert result["stopped_at"] == "implementer"
 
@@ -299,7 +358,7 @@ def test_pipeline_stops_after_test_failure(tmp_path: Path) -> None:
                          "elif [[ \"$prompt\" == *test-runner* ]]; then printf 'def test_generated():\\n    assert False\\n' > tests/test_generated.py; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("fallar pruebas", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project,
-                          use_tmux=False)
+                          use_tmux=False, spec_gate_decision="approve", gate_operator="test")
     state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
     assert result["status"] == "failed"
     assert result["stopped_at"] == "test-runner"
@@ -313,7 +372,7 @@ def test_reviewer_blocking_finding_stops_later_stages(tmp_path: Path) -> None:
                          f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: blocked\\nAGENT_SYS_FINDING: critical|src/example.py|contrato roto\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("bloquear review", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project,
-                          use_tmux=False)
+                          use_tmux=False, spec_gate_decision="approve", gate_operator="test")
     state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
     assert result["status"] == "failed"
     assert result["stopped_at"] == "reviewer"
@@ -327,7 +386,8 @@ def test_reviewer_rejects_checkout_mutation(tmp_path: Path) -> None:
                          f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'reviewed\\n' > review-mutated.txt; printf 'AGENT_SYS_REVIEW: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("mutar review", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project,
-                          use_tmux=False, stages=("spec-writer", "implementer", "test-runner", "reviewer"))
+                          use_tmux=False, stages=("spec-writer", "implementer", "test-runner", "reviewer"),
+                          spec_gate_decision="approve", gate_operator="test")
     assert result["status"] == "failed"
     assert result["stopped_at"] == "reviewer"
 
@@ -341,9 +401,79 @@ def test_ui_change_without_browser_is_not_verifiable(tmp_path: Path) -> None:
                          f"if [[ -n \"$name\" ]]; then mkdir -p openspec/changes/$name; cp -r {source}/proposal.md {source}/design.md {source}/tasks.md openspec/changes/$name/; cp -r {source}/specs openspec/changes/$name/; printf 'AGENT_SYS_CHANGE: %s\\n' \"$name\"; elif [[ \"$prompt\" == *'Rol: reviewer'* ]]; then printf 'AGENT_SYS_REVIEW: passed\\n'; else printf 'implementado\\n' > implementado.txt; fi; exit 0\n")
     result = run_pipeline("revisar interfaz", runs_dir=tmp_path / "runs",
                           codex_command=command, working_directory=project,
-                          use_tmux=False)
+                          use_tmux=False, spec_gate_decision="approve", gate_operator="test")
     state = json.loads((tmp_path / "runs" / result["run_id"] / "run.json").read_text())
     assert result["status"] == "blocked"
     assert result["stopped_at"] == "ui-reviewer"
     assert state["stages"]["ui-reviewer"]["status"] == "blocked"
     assert "NO_VERIFICABLE" in state["stages"]["ui-reviewer"]["reason"]
+
+
+def test_qa_blocks_when_predecessor_is_not_passed(tmp_path: Path) -> None:
+    result = run_stage("cerrar", role="qa", run_id="qa-no-handoff",
+                       runs_dir=tmp_path / "runs", codex_command="false", use_tmux=False)
+    assert result["status"] == "blocked"
+    assert "etapas previas no superadas" in result["reason"]
+
+
+def test_qa_rejects_checkout_mutation(tmp_path: Path) -> None:
+    project = prepare_valid_project(tmp_path)
+    stage_dir = tmp_path / "qa-stage"
+    stage_dir.mkdir()
+    (stage_dir / "stdout.log").write_text("AGENT_SYS_QA: passed\n")
+    stages = {
+        name: {"status": "passed", "result_file": str(tmp_path / f"{name}.json")}
+        for name in ("spec-writer", "implementer", "test-runner", "reviewer")
+    }
+    for stage in stages.values():
+        Path(stage["result_file"]).write_text("{}")
+    stages["implementer"]["git_root"] = str(project)
+    stages["ui-reviewer"] = {"status": "skipped"}
+    handoff = qa.validate_handoff(stages, project)
+    assert handoff["valid"]
+    (tmp_path / "qa-blocked").mkdir()
+    (tmp_path / "qa-blocked/stdout.log").write_text("AGENT_SYS_QA: blocked\n")
+    blocked = qa.evaluate(tmp_path / "qa-blocked", project, handoff)
+    assert blocked["valid"] is True
+    assert blocked["decision"] == "blocked"
+    (tmp_path / "qa-invalid").mkdir()
+    (tmp_path / "qa-invalid/stdout.log").write_text("resultado sin marcador\n")
+    invalid = qa.evaluate(tmp_path / "qa-invalid", project, handoff)
+    assert invalid["valid"] is False
+    assert invalid["decision"] == "invalid"
+    (project / "unexpected.txt").write_text("mutation\n")
+    result = qa.evaluate(stage_dir, project, handoff)
+    assert result["valid"] is False
+    assert result["error"] == "qa modificó el checkout"
+
+
+def test_run_queries_list_status_logs_and_artifacts(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    ledger = RunLedger(runs_dir / "query-run", "query-run", "consultar ejecución")
+    ledger.ensure_stage("spec-writer", role_config("spec-writer").to_dict())
+    ledger.create_gate("spec-review", stage="spec-writer")
+    ledger.record("custom_check", result="ok")
+
+    summary = status_runs(runs_dir)
+    assert summary["runs"][0]["run_id"] == "query-run"
+    assert summary["runs"][0]["gates"] == {"spec-review": "pending"}
+    one = status_runs(runs_dir, "query-run")
+    assert one["objective"] == "consultar ejecución"
+
+    events = read_logs(runs_dir, "query-run")
+    assert events[0]["type"] == "run_created"
+    assert events[-1]["type"] == "custom_check"
+
+    (runs_dir / "query-run" / "stages").mkdir()
+    (runs_dir / "query-run" / "stages" / "note.txt").write_text("evidence\n")
+    inspected = inspect_run(runs_dir, "query-run")
+    assert inspected["run"]["run_id"] == "query-run"
+    assert inspected["event_count"] == len(events)
+    assert "stages/note.txt" in inspected["artifacts"]
+
+
+def test_run_queries_reject_unknown_or_invalid_runs(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="run desconocido"):
+        status_runs(tmp_path / "runs", "missing")
+    with pytest.raises(ValueError, match="run desconocido"):
+        read_logs(tmp_path / "runs", "missing")

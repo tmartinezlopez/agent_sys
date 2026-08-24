@@ -54,6 +54,7 @@ ROLE_CATALOG: dict[str, RoleConfig] = {
     "qa": RoleConfig(
         "qa", "gpt-5.4", "medium", "read-only", 1200, 1,
         "Valida el resultado completo frente al objetivo y decide si esta listo para entrega.",
+        ("result.json", "qa-summary.json"),
     ),
 }
 

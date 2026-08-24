@@ -16,6 +16,7 @@ from .implementer import build_prompt as build_implementer_prompt, evaluate as e
 from .spec_writer import build_prompt as build_spec_writer_prompt, evaluate as evaluate_spec_writer
 from .test_runner import build_prompt as build_test_runner_prompt, execute_tests, validate_handoff as validate_test_handoff
 from .reviewer import build_prompt as build_reviewer_prompt, evaluate as evaluate_reviewer, validate_handoff as validate_reviewer_handoff
+from .qa import build_prompt as build_qa_prompt, evaluate as evaluate_qa, validate_handoff as validate_qa_handoff
 from .ui_reviewer import (affects_ui, build_prompt as build_ui_prompt,
                           check_prerequisites, validate_handoff as validate_ui_handoff,
                           write_unverifiable)
@@ -96,6 +97,16 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
             return {"run_id": run_id, "stage": role, "status": "blocked",
                     "reason": capability["reason"], "result_file": summary["summary_file"]}
         prompt = build_ui_prompt(objective, handoff, base_url)
+    elif role == "qa":
+        handoff = validate_qa_handoff(ledger.state["stages"], working_directory or Path.cwd())
+        if not handoff["valid"]:
+            reason = handoff["error"]
+            ledger.transition(role, "blocked", reason=reason)
+            ledger.state["status"] = "blocked"
+            ledger._save()
+            ledger.record("stage_blocked", stage=role, reason=reason)
+            return {"run_id": run_id, "stage": role, "status": "blocked", "reason": reason}
+        prompt = build_qa_prompt(objective, handoff)
     else:
         prompt = (f"Rol: {config.name}\nContrato: {config.prompt_contract}\n"
                   f"Objetivo del run: {objective}\n"
@@ -153,7 +164,12 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
         write_json(stage_dir / "test-summary.json", evaluation)
     elif result["exit_code"] == 0 and role == "reviewer":
         evaluation = evaluate_reviewer(stage_dir, working_directory or Path.cwd(), handoff)
-    status = "passed" if result["exit_code"] == 0 and evaluation.get("valid", True) else "failed"
+    elif result["exit_code"] == 0 and role == "qa":
+        evaluation = evaluate_qa(stage_dir, working_directory or Path.cwd(), handoff)
+    if role == "qa" and result["exit_code"] == 0 and evaluation.get("valid"):
+        status = "blocked" if evaluation["decision"] == "blocked" else "passed"
+    else:
+        status = "passed" if result["exit_code"] == 0 and evaluation.get("valid", True) else "failed"
     finished_at = now()
     result_document = {"run_id": run_id, "stage": role, "status": status, **result,
                        **evaluation,
@@ -172,20 +188,13 @@ def run_stage(objective: str, *, role: str = "spec-writer", runs_dir: Path = Pat
             "result_file": str(stage_dir / "result.json")}
 
 
-def run_pipeline(objective: str, *, runs_dir: Path = Path("runs"),
-                 codex_command: str = "codex", profile: str | None = None,
-                 working_directory: Path | None = None, timeout_seconds: float | None = None,
-                 tmux_session: str = "agent-sys", tmux_command: str = "tmux",
-                 use_tmux: bool = True, stages: tuple[str, ...] = STAGES) -> dict[str, Any]:
-    """Ejecuta las etapas declaradas en orden y detiene el run ante un fallo."""
-    unknown = set(stages) - set(STAGES)
-    if unknown:
-        raise ValueError(f"etapas no declaradas: {sorted(unknown)}")
-    run_id = new_run_id()
-    ledger = RunLedger(runs_dir / run_id, run_id, objective)
-    for stage in stages:
-        ledger.ensure_stage(stage, role_config(stage).to_dict())
-    for index, stage in enumerate(stages):
+def _execute_pipeline(ledger: RunLedger, objective: str, *, stages: tuple[str, ...],
+                      codex_command: str, profile: str | None,
+                      working_directory: Path | None, timeout_seconds: float | None,
+                      tmux_session: str, tmux_command: str, use_tmux: bool,
+                      start_index: int = 0, gate_decision: str | None = None,
+                      gate_operator: str = "operator", gate_reason: str | None = None) -> dict[str, Any]:
+    for index, stage in enumerate(stages[start_index:], start=start_index):
         if stage == "ui-reviewer":
             changed = ledger.state["stages"].get("implementer", {}).get("changed_files", [])
             change_dir = ledger.state["stages"].get("implementer", {}).get("change_dir")
@@ -210,8 +219,8 @@ def run_pipeline(objective: str, *, runs_dir: Path = Path("runs"),
             ledger.state["status"] = "blocked"
             ledger._save()
             ledger.record("pipeline_stopped", stage=stage, status="blocked", reason=reason)
-            return {"run_id": run_id, "status": "blocked", "stopped_at": stage, "reason": reason}
-        result = run_stage(objective, role=stage, run_id=run_id, codex_command=codex_command,
+            return {"run_id": ledger.run_id, "status": "blocked", "stopped_at": stage, "reason": reason}
+        result = run_stage(objective, role=stage, run_id=ledger.run_id, codex_command=codex_command,
                            profile=profile, working_directory=working_directory,
                            timeout_seconds=timeout_seconds, tmux_session=tmux_session,
                            tmux_command=tmux_command, use_tmux=use_tmux, _ledger=ledger)
@@ -222,12 +231,85 @@ def run_pipeline(objective: str, *, runs_dir: Path = Path("runs"),
             ledger.state["status"] = result["status"]
             ledger._save()
             ledger.record("pipeline_stopped", stage=stage, status=result["status"], reason=reason)
-            return {"run_id": run_id, "status": result["status"], "stopped_at": stage,
+            return {"run_id": ledger.run_id, "status": result["status"], "stopped_at": stage,
                     "reason": reason}
+        if stage == "spec-writer" and "implementer" in stages:
+            gate = ledger.create_gate("spec-review", stage="spec-writer")
+            if gate["status"] == "pending":
+                if gate_decision is None:
+                    ledger.state["status"] = "blocked"
+                    ledger._save()
+                    ledger.record("pipeline_stopped", stage="spec-review", status="blocked",
+                                  reason="gate humano pendiente")
+                    return {"run_id": ledger.run_id, "status": "blocked",
+                            "stopped_at": "spec-review", "reason": "gate humano pendiente"}
+                ledger.decide_gate("spec-review", gate_decision, operator=gate_operator,
+                                   reason=gate_reason)
+                if gate_decision == "reject":
+                    for remaining in stages[index + 1:]:
+                        ledger.transition(remaining, "blocked", reason="gate spec-review rechazado")
+                    ledger.state["status"] = "blocked"
+                    ledger._save()
+                    ledger.record("pipeline_stopped", stage="spec-review", status="blocked",
+                                  reason="gate spec-review rechazado")
+                    return {"run_id": ledger.run_id, "status": "blocked",
+                            "stopped_at": "spec-review", "reason": "gate spec-review rechazado"}
     ledger.state["status"] = "passed"
     ledger._save()
     ledger.record("pipeline_finished", status="passed", stages=list(stages))
-    return {"run_id": run_id, "status": "passed", "stages": list(stages)}
+    return {"run_id": ledger.run_id, "status": "passed", "stages": list(stages)}
+
+
+def run_pipeline(objective: str, *, runs_dir: Path = Path("runs"),
+                 codex_command: str = "codex", profile: str | None = None,
+                 working_directory: Path | None = None, timeout_seconds: float | None = None,
+                 tmux_session: str = "agent-sys", tmux_command: str = "tmux",
+                 use_tmux: bool = True, stages: tuple[str, ...] = STAGES,
+                 spec_gate_decision: str | None = None,
+                 gate_operator: str = "operator", gate_reason: str | None = None) -> dict[str, Any]:
+    """Ejecuta el pipeline y pausa ante el gate humano de la especificación."""
+    unknown = set(stages) - set(STAGES)
+    if unknown:
+        raise ValueError(f"etapas no declaradas: {sorted(unknown)}")
+    if spec_gate_decision not in (None, "approve", "reject"):
+        raise ValueError("spec_gate_decision debe ser approve o reject")
+    run_id = new_run_id()
+    ledger = RunLedger(runs_dir / run_id, run_id, objective)
+    for stage in stages:
+        ledger.ensure_stage(stage, role_config(stage).to_dict())
+    return _execute_pipeline(ledger, objective, stages=stages, codex_command=codex_command,
+                             profile=profile, working_directory=working_directory,
+                             timeout_seconds=timeout_seconds, tmux_session=tmux_session,
+                             tmux_command=tmux_command, use_tmux=use_tmux,
+                             gate_decision=spec_gate_decision, gate_operator=gate_operator,
+                             gate_reason=gate_reason)
+
+
+def resume_run(run_id: str, *, runs_dir: Path = Path("runs"), decision: str,
+               operator: str, reason: str | None = None, codex_command: str = "codex",
+               profile: str | None = None, working_directory: Path | None = None,
+               timeout_seconds: float | None = None, tmux_session: str = "agent-sys",
+               tmux_command: str = "tmux", use_tmux: bool = True) -> dict[str, Any]:
+    """Decide el gate pendiente y reanuda el mismo run desde implementer."""
+    ledger = RunLedger.load(runs_dir / run_id)
+    gate = ledger.decide_gate("spec-review", decision, operator=operator, reason=reason)
+    stages = tuple(ledger.state["stages"])
+    if decision == "reject":
+        for stage in stages[1:]:
+            if ledger.state["stages"].get(stage, {}).get("status") == "pending":
+                ledger.transition(stage, "blocked", reason="gate spec-review rechazado")
+        ledger.state["status"] = "blocked"
+        ledger._save()
+        ledger.record("pipeline_stopped", stage="spec-review", status="blocked",
+                      reason="gate spec-review rechazado")
+        return {"run_id": run_id, "status": "blocked", "gate": gate}
+    implementer_index = stages.index("implementer")
+    return _execute_pipeline(ledger, ledger.state["objective"], stages=stages,
+                             codex_command=codex_command, profile=profile,
+                             working_directory=working_directory,
+                             timeout_seconds=timeout_seconds, tmux_session=tmux_session,
+                             tmux_command=tmux_command, use_tmux=use_tmux,
+                             start_index=implementer_index)
 
 
 def run_once(prompt: str, *, runs_dir: Path = Path("runs"), run_id: str | None = None,
