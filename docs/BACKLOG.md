@@ -13,49 +13,49 @@ ya esté completo.
   devuelve `OpenSpec root: ok`.
 - [x] Verificar herramientas. Evidencia: OpenSpec `1.10.0`, Codex CLI
   `0.149.1`, tmux `3.6`; `codex login status` devuelve `Logged in using ChatGPT`.
-- [ ] Completar `openspec/config.yaml` con el contexto Python/Bash y comandos
+- [x] Completar `openspec/config.yaml` con el contexto Python/Bash y comandos
   reales de calidad.
 
 ## 1. Contrato global
 
 Prerrequisito: bootstrap de herramientas.
 
-- [ ] Crear el catálogo de los seis roles con modelo, reasoning, sandbox,
+- [x] Crear el catálogo de los seis roles con modelo, reasoning, sandbox,
   timeout, reintentos, prompt y artefactos esperados.
-- [ ] Definir estados, eventos, códigos de salida y transiciones válidas.
-- [ ] Verificar el contrato con tests de configuración y transiciones.
+- [x] Definir estados, eventos, códigos de salida y transiciones válidas.
+- [x] Verificar el contrato con tests de configuración y transiciones.
 
 ## 2. Estado y ledger
 
 Prerrequisito: contrato global.
 
-- [ ] Implementar `run.json`, `events.jsonl`, resultados de etapa y resumen.
-- [ ] Implementar reconstrucción de un run desde disco.
-- [ ] Verificar éxito, fallo, timeout y bloqueo con tests dirigidos.
+- [x] Implementar `run.json`, `events.jsonl`, resultados de etapa y resumen.
+- [x] Implementar reconstrucción de un run desde disco.
+- [x] Verificar éxito, fallo, timeout y bloqueo con tests dirigidos.
 
 ## 3. Runtime tmux
 
 Prerrequisitos: contrato global y, para worktrees, checkout Git válido.
 
-- [ ] Crear/reutilizar sesión del proyecto y ventana `coordinator`.
-- [ ] Crear ventanas nombradas `run:<run_id>:<role>`.
-- [ ] Verificar que no se modifican sesiones o procesos ajenos.
+- [x] Crear/reutilizar sesión del proyecto y ventana `coordinator`.
+- [x] Crear ventanas nombradas por run y rol.
+- [x] Verificar que no se modifican sesiones o procesos ajenos.
 
 ## 4. Lanzador Codex
 
 Prerrequisitos: contrato global y estado persistente.
 
-- [ ] Construir la orden real `codex exec` desde la configuración del rol.
-- [ ] Aplicar modelo, reasoning, sandbox, directorio, prompt y timeout.
-- [ ] Persistir stdout, stderr, código de salida y comando exacto.
-- [ ] Verificar éxito, error de proceso, binario ausente y timeout.
+- [x] Construir la orden real `codex exec` desde la configuración del rol.
+- [x] Aplicar modelo, reasoning, sandbox, directorio, prompt y timeout.
+- [x] Persistir stdout, stderr, código de salida y comando exacto.
+- [x] Verificar éxito, error de proceso, binario ausente y timeout.
 
 ## 5. Primera ejecución completa
 
 Prerrequisitos: estado, tmux y lanzador Codex.
 
-- [ ] Lanzar una etapa desde el coordinador dentro de una ventana tmux.
-- [ ] Registrar inicio, finalización, resultado y artefactos.
+- [x] Lanzar una etapa desde el coordinador dentro de una ventana tmux.
+- [x] Registrar inicio, finalización, resultado y artefactos.
 - [ ] Verificar que una etapa fallida impide lanzar la siguiente.
 
 ## 6. Roles

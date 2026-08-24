@@ -1,13 +1,18 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Proyecto Python y Bash con codigo en src/agent_sys y pruebas con pytest.
+  La entrada publica es scripts/run.sh y el coordinador se llama pipeline.
+  El runtime usa procesos externos de Codex CLI mediante `codex exec`; no usa
+  la API de OpenAI. Codex CLI local: 0.149.1. tmux local: 3.6.
+  La ejecucion debe ser observable y persistente en runs/<run_id> mediante
+  run.json, events.jsonl y artefactos por etapa.
+  El pipeline final declara exactamente estos roles: spec-writer, implementer,
+  test-runner, reviewer, ui-reviewer y qa. Sus modelos son, respectivamente,
+  gpt-5.6-luna, gpt-5.4, gpt-5.3-codex, gpt-5.6-luna, gpt-5.4 y gpt-5.4,
+  todos con razonamiento medium. No se deben introducir roles genericos ni
+  configuraciones ficticias en produccion.
+  No publicar cambios en GitHub salvo orden explicita del operador.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
@@ -18,6 +23,16 @@ schema: spec-driven
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+
+rules:
+  proposal:
+    - Mantener el alcance en un bloque vertical verificable.
+    - Declarar los no objetivos y no inventar equivalencias de Codex sin verificarlas.
+  design:
+    - Preferir contratos concretos y una unica fuente de verdad.
+  tasks:
+    - Cada tarea debe tener una prueba o comando de verificacion asociado.
+    - No dejar mocks, agentes genericos o configuraciones falsas como runtime.
 
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.
@@ -30,3 +45,9 @@ schema: spec-driven
 #     archive:
 #       guidance:
 #         - Summarize the archive outcome before finishing
+
+operations:
+  apply:
+    guidance:
+      - Implementar por bloques coherentes y ejecutar pruebas tras cada bloque.
+      - Mantener los cambios locales; no hacer push.

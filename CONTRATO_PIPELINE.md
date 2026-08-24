@@ -26,9 +26,10 @@ estado actual.
 
 ## Estado de implementación
 
-El repositorio todavía contiene un runner provisional de una sola etapa. Aún no
-están implementados tmux, el ledger completo ni los seis roles. El orden para
-construirlos está en [`docs/BACKLOG.md`](docs/BACKLOG.md).
+El runtime base ya declara los seis roles, persiste el ledger y puede ejecutar
+una etapa real dentro de una ventana tmux propia. El coordinador secuencial de
+las seis etapas, gates, reintentos y recuperación sigue pendiente en
+[`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 La ejecución productiva usará la cuenta autenticada del Codex CLI mediante
 `codex exec`; no se utilizará la API de OpenAI.

@@ -128,5 +128,5 @@ coordinador y visible en tmux.
 - OpenSpec `1.10.0`, inicializado para Codex.
 - Codex CLI `0.149.1`, autenticado mediante ChatGPT.
 - tmux `3.6`.
-- El directorio actual no es un checkout Git; worktrees y ramas quedan
-  bloqueados hasta resolver esa decisión sin sobrescribir los ficheros actuales.
+- El directorio actual ya es un checkout Git local con `origin/main` conservado;
+  no se ha hecho push y los worktrees siguen fuera del alcance de este bloque.
