@@ -72,6 +72,15 @@ def run_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | N
         "durationSeconds": duration,
         "idleSeconds": idle,
         "pendingGates": pending_gates,
+        "pendingGateIds": [gate["gateId"] for gate in state.get("gates", [])
+                           if gate.get("status") == "pending"],
+        "ui": state.get("ui", False),
+        "applicableStages": state.get("applicableStages", []),
+        "completedStages": [task.get("role") for task in state.get("tasks", [])
+                            if task.get("status") == "completed"],
+        "failedStages": [task.get("role") for task in state.get("tasks", [])
+                         if task.get("status") == "failed"],
+        "readyForReview": state.get("readyForReview", False),
         "anomalies": len(state.get("anomalies", [])),
     }
 

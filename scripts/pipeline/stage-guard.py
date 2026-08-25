@@ -29,17 +29,21 @@ def main() -> None:
     if roles[args.role].get("sandbox") != EXPECTED_SANDBOX[args.role]:
         fail(f"sandbox inválido para {args.role}")
     state_path = Path(args.worktree) / ".pipeline" / "runs" / args.run_id / "current-state.json"
+    run_path = Path(args.worktree) / ".pipeline" / "runs" / args.run_id / "run.json"
     if not state_path.is_file():
         fail(f"ledger sin estado derivado: {args.run_id}")
+    run = json.loads(run_path.read_text(encoding="utf-8")) if run_path.is_file() else {}
+    if args.role == "ui-reviewer" and not run.get("ui", False):
+        fail("ui-reviewer omitido: la feature no está marcada como UI")
     state = json.loads(state_path.read_text(encoding="utf-8"))
     latest = {task.get("role"): task.get("status") for task in state.get("tasks", [])}
     gates = {gate.get("gateId"): gate.get("status") for gate in state.get("gates", [])}
-    index = STAGES.index(args.role)
+    applicable = [stage for stage in STAGES
+                  if stage != "ui-reviewer" or bool(run.get("ui", False))]
+    index = applicable.index(args.role)
     if index:
-        predecessor = STAGES[index - 1]
-        if predecessor == "ui-reviewer" and latest.get(predecessor) == "skipped":
-            pass
-        elif latest.get(predecessor) != "completed":
+        predecessor = applicable[index - 1]
+        if latest.get(predecessor) != "completed":
             fail(f"{args.role} bloqueado: predecesora {predecessor} no está completada")
     if args.role == "implementer" and gates.get("gate_spec") != "approved":
         fail("implementer bloqueado: gate_spec no está aprobado")

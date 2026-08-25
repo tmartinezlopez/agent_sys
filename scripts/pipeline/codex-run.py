@@ -20,6 +20,14 @@ def load_roles() -> dict[str, dict[str, Any]]:
     return json.loads(ROLES_PATH.read_text(encoding="utf-8"))
 
 
+def coerce_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     roles = load_roles()
     if args.role not in roles:
@@ -55,8 +63,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     except subprocess.TimeoutExpired as exc:
         exit_code = 124
         error = f"timeout tras {args.timeout or role['timeout_seconds']} segundos"
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
+        stdout = coerce_text(exc.stdout)
+        stderr = coerce_text(exc.stderr)
     except OSError as exc:
         exit_code = 127
         error = str(exc)

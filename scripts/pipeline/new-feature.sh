@@ -4,7 +4,7 @@
 set -euo pipefail
 
 usage() {
-  echo "uso: new-feature.sh <nombre-kebab-case> [objetivo] [--no-tmux] [--codex-command comando] [--timeout segundos]" >&2
+  echo "uso: new-feature.sh <nombre-kebab-case> [objetivo] [--ui] [--no-tmux] [--codex-command comando] [--timeout segundos]" >&2
   exit 1
 }
 
@@ -13,11 +13,13 @@ item="${1:-}"
 shift
 objective=""
 no_tmux=0
+ui=0
 codex_command="codex"
 timeout=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-tmux) no_tmux=1; shift ;;
+    --ui) ui=1; shift ;;
     --codex-command) codex_command="${2:?--codex-command requiere comando}"; shift 2 ;;
     --timeout) timeout="${2:?--timeout requiere segundos}"; shift 2 ;;
     *) [ -z "$objective" ] || { echo "sólo se admite un objetivo" >&2; exit 1; }; objective="$1"; shift ;;
@@ -52,6 +54,7 @@ fi
 pipeline="$worktree_path/scripts/pipeline/run-pipeline.sh"
 command=("$pipeline" "$item" "$objective" --worktree "$worktree_path"
          --codex-command "$codex_command")
+[ "$ui" -eq 1 ] && command+=(--ui)
 [ -n "$timeout" ] && command+=(--timeout "$timeout")
 
 if [ "$no_tmux" -eq 0 ] && command -v tmux >/dev/null 2>&1; then

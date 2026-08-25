@@ -15,11 +15,11 @@ La adaptación a Codex no copia literalmente el sistema de referencia:
   codex exec con seis roles declarados en roles.json.
 - La evidencia de cada etapa son command, result.json, stdout.log y
   stderr.log; no se intenta atribuir transcripts ni tokens de Claude.
-- El primer slice implementado es spec-writer → gate → implementer. Los
-  roles posteriores están declarados, pero su orquestación completa queda para
-  el siguiente bloque.
-- No se incluye todavía revisión UI mediante bridge de navegador, watchdog
-  completo ni una operación ship-feature.sh.
+- El runtime orquesta `spec-writer → gate_spec → implementer → test-runner →
+  reviewer → qa`, e inserta `ui-reviewer` cuando la feature se inicia con
+  `--ui`. Después de QA abre `gate_release` para una decisión humana.
+- La revisión UI sigue siendo read-only y no incluye un bridge de navegador;
+  tampoco hay todavía watchdog completo ni una operación ship-feature.sh.
 - El runtime no hace merge, push, limpieza de worktree ni publicación
   automática. La rama queda disponible para inspección humana.
 
@@ -36,3 +36,6 @@ temporal y sin tmux:
   confirmó ambas etapas y las consultas no mutaron `events.jsonl`.
 - El checkout principal permaneció sin cambios adicionales y no hubo merge ni
   push automáticos.
+
+El bloque de etapas completo añade pruebas deterministas de los flujos UI y
+no-UI, reintento desde una etapa fallida y timeout con evidencia persistida.

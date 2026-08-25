@@ -6,29 +6,34 @@ los roles se mantienen separados de esta capa.
 
 ## Flujo principal
 
-- new-feature.sh <item> <objetivo> crea feature/<item> en un worktree y
-  lanza el slice spec-writer.
-- gate.sh <run_id> approve|changes|discard --worktree <ruta> registra la
-  decisión humana.
-- resume-run.sh <run_id> --worktree <ruta> continúa el mismo run en
-  implementer después de aprobar el gate.
+- new-feature.sh <item> <objetivo> [--ui] crea feature/<item> en un worktree y
+  lanza el slice spec-writer. `--ui` incluye `ui-reviewer` en las etapas
+  posteriores.
+- gate.sh <run_id> approve|changes|discard <operator> [reason] --worktree
+  <ruta> registra la decisión humana. Para el gate final se añade
+  `--gate gate_release`.
+- resume-run.sh <run_id> --worktree <ruta> continúa el mismo run desde la
+  primera etapa abierta y avanza por `implementer`, `test-runner`, `reviewer`,
+  `ui-reviewer` (si aplica) y `qa`.
 - stop-run.sh <run_id> --worktree <ruta> --force detiene sólo la ventana tmux
   registrada para ese run y deja el worktree intacto.
 
-Cada run queda en .pipeline/runs/<run_id>/ con run.json, events.jsonl,
-estado derivado y evidencias por etapa. Ese estado es local y está ignorado
-por Git.
+Cada run queda en `.pipeline/runs/<run_id>/` con `run.json`, `events.jsonl`,
+estado derivado, `summary.json` y evidencias por etapa. Tras QA se abre
+`gate_release`; sólo su aprobación deja el run en `completed`. Ese estado es
+local y está ignorado por Git.
 
 ## Consultas
 
-- pipelines-status.sh lista los runs del checkout y sus worktrees.
+- pipelines-status.sh lista los runs del checkout y sus worktrees, etapas
+  completadas y gates pendientes.
 - run-health-check.py devuelve triage JSON read-only, incluidos gates y
   posibles estancamientos.
 - run-logs.py <run_id> muestra eventos, prompts y stdout/stderr persistidos.
 - run-report.py <run_id> resume etapas, modelos, sandbox y resultados Codex.
 
-Las consultas leen el ledger en memoria: no regeneran current-state.json, no
-añaden eventos y no crean summary.json.
+Las consultas leen el ledger en memoria: no regeneran `current-state.json`, no
+añaden eventos y no crean `summary.json`.
 
 ## Seguridad
 

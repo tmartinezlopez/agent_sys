@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-  echo "uso: run-pipeline.sh <item> <objetivo> [--worktree ruta] [--run-id id] [--codex-command comando] [--timeout segundos]" >&2
+  echo "uso: run-pipeline.sh <item> <objetivo> [--worktree ruta] [--run-id id] [--ui] [--codex-command comando] [--timeout segundos]" >&2
   exit 1
 }
 
@@ -15,10 +15,12 @@ worktree="$(pwd)"
 run_id=""
 codex_command="codex"
 timeout=""
+ui=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --worktree) worktree="${2:?--worktree requiere ruta}"; shift 2 ;;
     --run-id) run_id="${2:?--run-id requiere id}"; shift 2 ;;
+    --ui) ui=1; shift ;;
     --codex-command) codex_command="${2:?--codex-command requiere comando}"; shift 2 ;;
     --timeout) timeout="${2:?--timeout requiere segundos}"; shift 2 ;;
     *) echo "argumento desconocido: $1" >&2; exit 1 ;;
@@ -35,7 +37,9 @@ run_dir="$worktree/.pipeline/runs/$run_id"
 stage_dir="$run_dir/stages/spec-writer"
 mkdir -p "$stage_dir"
 
-python3 "$script_dir/run-ledger.py" init "$run_id" --worktree "$worktree"
+init_args=(python3 "$script_dir/run-ledger.py" init "$run_id" --worktree "$worktree")
+[ "$ui" -eq 1 ] && init_args+=(--ui)
+"${init_args[@]}"
 python3 - "$stage_dir/prompt.md" "$change_name" "$objective" <<'PY'
 from pathlib import Path
 import sys

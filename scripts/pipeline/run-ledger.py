@@ -14,6 +14,7 @@ from typing import Any
 
 STAGES = ("spec-writer", "implementer", "test-runner", "reviewer", "ui-reviewer", "qa")
 SPEC_GATE = "gate_spec"
+RELEASE_GATE = "gate_release"
 
 
 def now() -> str:
@@ -90,18 +91,27 @@ def state_from(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, A
             gate = gates.setdefault(gate_id, {"gateId": gate_id, "status": "pending"})
             if isinstance(task_id, str):
                 gate["taskId"] = task_id
-            if event_type == "approved":
+            if event_type == "gate_opened":
+                gate["status"] = "pending"
+            elif event_type == "approved":
                 gate.update(status="approved", approvedBy=event.get("aprobado_por"))
             elif event_type == "rejected":
                 gate.update(status="rejected", reason=event.get("reason"))
+            elif event_type == "changes_requested":
+                gate.update(status="changes_requested", reason=event.get("reason"))
         if event_type == "anomaly":
             anomalies.append(event)
 
+    applicable = [stage for stage in STAGES
+                  if stage != "ui-reviewer" or bool(run.get("ui", False))]
     statuses = {task["status"] for task in tasks.values()}
     pending_gates = [gate for gate in gates.values() if gate["status"] == "pending"]
     if anomalies or pending_gates:
         status = "blocked"
-    elif statuses and statuses <= {"completed"}:
+    elif (all(next((task.get("status") for task in tasks.values()
+                    if task.get("role") == stage), None) == "completed"
+              for stage in applicable)
+          and gates.get(RELEASE_GATE, {}).get("status") == "approved"):
         status = "completed"
     elif "failed" in statuses:
         status = "failed"
@@ -113,6 +123,9 @@ def state_from(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, A
         "updatedAt": now(),
         "tasks": list(tasks.values()),
         "gates": list(gates.values()),
+        "ui": bool(run.get("ui", False)),
+        "applicableStages": applicable,
+        "readyForReview": gates.get(RELEASE_GATE, {}).get("status") == "pending",
         "anomalies": anomalies,
         "eventCount": len(events),
     }
@@ -138,7 +151,8 @@ def command_init(args: argparse.Namespace) -> None:
             raise SystemExit(f"run existente inválido: {run_path}")
     else:
         atomic_write(run_path, {"runId": args.run_id, "createdAt": now(),
-                                "worktree": str(Path(args.worktree or os.getcwd()).resolve())})
+                                "worktree": str(Path(args.worktree or os.getcwd()).resolve()),
+                                "ui": bool(args.ui)})
     pointer_path(args.worktree).parent.mkdir(parents=True, exist_ok=True)
     pointer_path(args.worktree).write_text(args.run_id + "\n", encoding="utf-8")
     events_path.touch(exist_ok=True)
@@ -176,10 +190,13 @@ def command_event(args: argparse.Namespace) -> None:
     rebuild(args.run_id, args.worktree)
 
 
-def resume_plan(run_id: str, events: list[dict[str, Any]]) -> dict[str, Any]:
+def resume_plan(run_id: str, run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
     role_status: dict[str, str] = {}
     change: str | None = None
-    gates: dict[str, dict[str, Any]] = {SPEC_GATE: {"status": "pending", "approvedBy": None}}
+    gates: dict[str, dict[str, Any]] = {
+        SPEC_GATE: {"status": "pending", "approvedBy": None},
+        RELEASE_GATE: {"status": "not_opened", "approvedBy": None},
+    }
     for event in events:
         role = event.get("role")
         event_type = event.get("type")
@@ -188,24 +205,40 @@ def resume_plan(run_id: str, events: list[dict[str, Any]]) -> dict[str, Any]:
         if isinstance(event.get("change"), str):
             change = event["change"]
         gate_id = event.get("gateId")
-        if isinstance(gate_id, str) and event_type in ("approved", "rejected"):
+        if isinstance(gate_id, str) and event_type in ("gate_opened", "approved", "rejected", "changes_requested"):
             gate = gates.setdefault(gate_id, {"status": "pending", "approvedBy": None})
-            gate["status"] = "approved" if event_type == "approved" else "rejected"
-            gate["approvedBy"] = event.get("aprobado_por")
-    last_completed = next((stage for stage in reversed(STAGES) if role_status.get(stage) == "completed"), None)
-    open_stage = next((stage for stage in STAGES if role_status.get(stage) == "dispatched"), None)
+            if event_type == "gate_opened":
+                gate["status"] = "pending"
+            elif event_type == "approved":
+                gate["status"] = "approved"
+                gate["approvedBy"] = event.get("aprobado_por")
+            elif event_type == "changes_requested":
+                gate["status"] = "changes_requested"
+            else:
+                gate["status"] = "rejected"
+            gate["reason"] = event.get("reason")
+    applicable = [stage for stage in STAGES
+                  if stage != "ui-reviewer" or bool(run.get("ui", False))]
+    last_completed = next((stage for stage in reversed(applicable)
+                           if role_status.get(stage) == "completed"), None)
+    open_stage = next((stage for stage in applicable
+                       if role_status.get(stage) in ("dispatched", "failed")), None)
     if open_stage:
         resume_stage, mid_stage = open_stage, True
     elif role_status.get("spec-writer") == "completed" and gates[SPEC_GATE]["status"] != "approved":
         resume_stage, mid_stage = SPEC_GATE, False
-    elif last_completed is None:
-        resume_stage, mid_stage = STAGES[0], False
+    elif all(role_status.get(stage) == "completed" for stage in applicable):
+        if gates[RELEASE_GATE]["status"] != "approved":
+            resume_stage, mid_stage = RELEASE_GATE, False
+        else:
+            resume_stage, mid_stage = None, False
     else:
-        index = STAGES.index(last_completed)
-        resume_stage, mid_stage = (STAGES[index + 1], False) if index + 1 < len(STAGES) else (None, False)
+        resume_stage = next(stage for stage in applicable if role_status.get(stage) != "completed")
+        mid_stage = False
     return {"runId": run_id, "change": change, "lastCompletedStage": last_completed,
             "resumeStage": resume_stage, "midStage": mid_stage,
-            "midStageRole": open_stage, "gates": gates}
+            "midStageRole": open_stage, "gates": gates, "ui": bool(run.get("ui", False)),
+            "applicableStages": applicable}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -215,6 +248,8 @@ def parser() -> argparse.ArgumentParser:
         command = sub.add_parser(name)
         command.add_argument("run_id")
         command.add_argument("--worktree")
+        if name == "init":
+            command.add_argument("--ui", action="store_true")
         if name == "event":
             command.add_argument("event_type")
             command.add_argument("--emitter", required=True)
@@ -230,7 +265,8 @@ def parser() -> argparse.ArgumentParser:
 def command_summary(args: argparse.Namespace) -> None:
     state = rebuild(args.run_id, args.worktree)
     root, _, _, _ = run_paths(args.run_id, args.worktree)
-    summary = {key: state[key] for key in ("runId", "status", "eventCount", "tasks", "gates", "anomalies")}
+    summary = {key: state[key] for key in ("runId", "status", "eventCount", "tasks", "gates",
+                                           "ui", "applicableStages", "readyForReview", "anomalies")}
     summary["generatedAt"] = now()
     atomic_write(root / "summary.json", summary)
     pointer = pointer_path(args.worktree)
@@ -243,7 +279,8 @@ def command_resume_plan(args: argparse.Namespace) -> None:
     root, run_path, events_path, _ = run_paths(args.run_id, args.worktree)
     if not root.is_dir() or not run_path.exists():
         raise SystemExit(f"run no encontrado: {args.run_id}")
-    print(json.dumps(resume_plan(args.run_id, load_events(events_path)), ensure_ascii=False, indent=2))
+    print(json.dumps(resume_plan(args.run_id, read_json(run_path), load_events(events_path)),
+                     ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

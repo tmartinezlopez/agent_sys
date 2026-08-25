@@ -20,8 +20,10 @@ for run in data["runs"]:
     run_id = run["runId"]
     status = run["status"]
     events = run["eventCount"]
-    gate = " · GATE PENDIENTE" if run["pendingGates"] else ""
-    print(f"  {run_id}: {status} · {events} eventos{gate}")
+    gate_ids = ",".join(run.get("pendingGateIds", []))
+    gate = f" · GATES PENDIENTES: {gate_ids}" if gate_ids else ""
+    completed = ",".join(run.get("completedStages", [])) or "ninguna"
+    print(f"  {run_id}: {status} · {events} eventos · completadas: {completed}{gate}")
 for finding in data["findings"]:
     kind = finding["kind"]
     run_id = finding["runId"]
