@@ -82,6 +82,11 @@ finalización dejará la etapa abierta/fallida y conservará stdout, stderr y
 anteriores completadas. Las consultas permanecerán read-only y no repararán el
 ledger implícitamente.
 
+`resume-run.sh` conserva una copia estable de sí mismo y de `run-stage.sh` bajo
+`.pipeline/runs/<run_id>/runtime/` antes de despachar etapas. El agente
+implementador puede modificar el checkout de la feature, pero no puede alterar
+el intérprete que ya está coordinando ese run mientras espera su resultado.
+
 ## Risks / Trade-offs
 
 - **[Una etapa read-only puede producir un diagnóstico no accionable]** → El

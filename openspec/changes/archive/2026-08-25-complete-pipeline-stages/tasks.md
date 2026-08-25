@@ -55,11 +55,11 @@
 
 ## 5. Validación E2E y cierre del bloque
 
-- [ ] 5.1 Ejecutar una E2E con Codex CLI real para una feature no-UI,
+- [x] 5.1 Ejecutar una E2E con Codex CLI real para una feature no-UI,
   comprobando worktree aislado, ledger, gates, seis etapas aplicables y
   `run_id` único.
-- [ ] 5.2 Ejecutar una E2E con Codex CLI real para una feature UI o justificar
+- [x] 5.2 Ejecutar una E2E con Codex CLI real para una feature UI o justificar
   con evidencia reproducible el camino condicional; verificar que
   `ui-reviewer` aparece una sola vez.
-- [ ] 5.3 Validar OpenSpec con `--strict`, actualizar diferencias deliberadas
+- [x] 5.3 Validar OpenSpec con `--strict`, actualizar diferencias deliberadas
   y dejar el bloque archivado sólo cuando no queden tareas pendientes.

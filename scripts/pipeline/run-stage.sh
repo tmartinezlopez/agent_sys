@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="${PIPELINE_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 worktree="$(cd "$worktree" && pwd)"
 run_dir="$worktree/.pipeline/runs/$run_id"
 stage_dir="$run_dir/stages/$role"

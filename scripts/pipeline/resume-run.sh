@@ -22,6 +22,19 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 worktree="$(cd "$worktree" && pwd)"
+
+if [ -z "${PIPELINE_RESUME_SNAPSHOT:-}" ]; then
+  runtime_dir="$worktree/.pipeline/runs/$run_id/runtime"
+  mkdir -p "$runtime_dir"
+  snapshot="$runtime_dir/resume-run.sh"
+  cp "$script_dir/resume-run.sh" "$snapshot"
+  reexec_args=("$run_id" --worktree "$worktree" --codex-command "$codex_command")
+  [ -n "$timeout" ] && reexec_args+=(--timeout "$timeout")
+  export PIPELINE_RESUME_SNAPSHOT=1
+  export PIPELINE_SCRIPT_DIR="$script_dir"
+  exec bash "$snapshot" "${reexec_args[@]}"
+fi
+
 plan_cmd=(python3 "$script_dir/run-ledger.py" resume-plan "$run_id" --worktree "$worktree")
 
 plan="$("${plan_cmd[@]}")"
@@ -80,10 +93,12 @@ while :; do
     echo "COMPLETED run_id=$run_id status=completed"
     exit 0
   fi
-  stage_args=("$script_dir/run-stage.sh" "$run_id" "$resume_stage"
+  stage_snapshot="$worktree/.pipeline/runs/$run_id/runtime/run-stage-$resume_stage.sh"
+  cp "$script_dir/run-stage.sh" "$stage_snapshot"
+  stage_args=(bash "$stage_snapshot" "$run_id" "$resume_stage"
     --worktree "$worktree" --change "$change" --codex-command "$codex_command")
   [ -n "$timeout" ] && stage_args+=(--timeout "$timeout")
-  if ! "${stage_args[@]}"; then
+  if ! PIPELINE_SCRIPT_DIR="$script_dir" "${stage_args[@]}"; then
     echo "stage failed: $resume_stage run_id=$run_id" >&2
     exit 1
   fi

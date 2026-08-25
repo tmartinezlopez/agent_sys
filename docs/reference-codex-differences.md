@@ -39,3 +39,20 @@ temporal y sin tmux:
 
 El bloque de etapas completo añade pruebas deterministas de los flujos UI y
 no-UI, reintento desde una etapa fallida y timeout con evidencia persistida.
+
+La validación E2E del bloque completo se ejecutó con Codex CLI real el
+25-08-2026, sin tmux y en worktrees temporales:
+
+- No-UI: `run_e2e-full-real_20260825-070626_484784` terminó `completed` con
+  `spec-writer`, `implementer`, `test-runner`, `reviewer` y `qa`. El primer
+  intento de `test-runner` dejó evidencia del rechazo de `gpt-5.3-codex` por la
+  cuenta ChatGPT; el mismo run se reanudó sin repetir las etapas anteriores y
+  pasó con `gpt-5.6-luna` y razonamiento `high`.
+- UI: `run_e2e-ui-real_20260825-073115_538376` terminó `completed` con las seis
+  etapas y un único despacho de `ui-reviewer`; `openspec validate --strict`
+  pasó para el change generado.
+
+Durante la E2E UI se detectó y corrigió una condición de carrera: el runner
+ahora ejecuta snapshots estables de `resume-run.sh` y `run-stage.sh` dentro del
+ledger, de modo que los cambios del implementador en el worktree no alteran la
+coordinación activa.
