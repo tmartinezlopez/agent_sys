@@ -47,19 +47,19 @@
 
 ## 5. Operación y seguridad del slice
 
-- [ ] 5.1 Implementar `status`, logs, health-check y report del ledger como
+- [x] 5.1 Implementar `status`, logs, health-check y report del ledger como
   consultas read-only; verificar listado multi-run, run desconocido y ausencia
   de mutaciones.
-- [ ] 5.2 Implementar parada segura limitada a la ventana/proceso del run y
+- [x] 5.2 Implementar parada segura limitada a la ventana/proceso del run y
   registrar su resultado; verificar que no afecta sesiones tmux ajenas.
-- [ ] 5.3 Impedir merge y push desde el runtime de agentes y dejar la rama de
+- [x] 5.3 Impedir merge y push desde el runtime de agentes y dejar la rama de
   feature lista para revisión humana; verificar el bloqueo en un repositorio
   temporal.
 
 ## 6. Verificación de arquitectura
 
-- [ ] 6.1 Ejecutar una prueba end-to-end real del vertical slice con Codex CLI,
+- [x] 6.1 Ejecutar una prueba end-to-end real del vertical slice con Codex CLI,
   comprobando worktree aislado, ledger, gate, reanudación y mismo `run_id`.
-- [ ] 6.2 Ejecutar las pruebas deterministas del runtime, validar OpenSpec con
+- [x] 6.2 Ejecutar las pruebas deterministas del runtime, validar OpenSpec con
   `--strict` y documentar las diferencias deliberadas frente al repositorio de
   referencia antes de incorporar más roles.

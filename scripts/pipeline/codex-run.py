@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 ROLES_PATH = ROOT / "roles.json"
+GIT_GUARD = ROOT / "git-guard.sh"
 
 
 def load_roles() -> dict[str, dict[str, Any]]:
@@ -29,6 +31,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     stdout_path = output_dir / "stdout.log"
     stderr_path = output_dir / "stderr.log"
     result_path = output_dir / "result.json"
+    guard_dir = output_dir / ".runtime-bin"
+    guard_dir.mkdir(parents=True, exist_ok=True)
+    guard_path = guard_dir / "git"
+    if guard_path.exists() or guard_path.is_symlink():
+        guard_path.unlink()
+    guard_path.symlink_to(GIT_GUARD)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{guard_dir}:{environment.get('PATH', '')}"
     command = [args.codex_command, "exec", "--json", "--sandbox", role["sandbox"],
                "--model", role["model"], "-c", f"model_reasoning_effort={role['reasoning']}",
                "--cd", str(Path(args.worktree).resolve()), prompt]
@@ -37,7 +47,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     try:
         outcome = subprocess.run(command, cwd=args.worktree, text=True,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=args.timeout or role["timeout_seconds"], check=False)
+                                 timeout=args.timeout or role["timeout_seconds"], check=False,
+                                 env=environment)
         exit_code = outcome.returncode
         stdout = outcome.stdout
         stderr = outcome.stderr
@@ -63,6 +74,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "command": command,
         "stdoutFile": str(stdout_path),
         "stderrFile": str(stderr_path),
+        "gitGuard": "merge-push-blocked",
     }
     result_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n",
                            encoding="utf-8")
