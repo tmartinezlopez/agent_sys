@@ -24,7 +24,7 @@ no deben integrar ni publicar cambios.
 
 - Implementar una interfaz web o un watchdog persistente.
 - Conceder a ningún agente permisos de merge, push o publicación.
-- Cambiar los seis roles, modelos o sandboxes ya declarados.
+- Añadir roles nuevos o cambiar los sandboxes declarados.
 
 ## Decisions
 
@@ -50,6 +50,12 @@ seguirá siendo el único rol escribible después del spec.
 Alternativa descartada: ejecutar todos los roles desde un único prompt Codex.
 Perdería aislamiento, evidencia por etapa, reanudación precisa y control de
 permisos.
+
+El perfil de `test-runner` usa `gpt-5.6-luna` con razonamiento `high`, porque
+`gpt-5.3-codex` no está disponible para la cuenta ChatGPT usada por Codex CLI.
+La prueba E2E dejó constancia del rechazo del modelo anterior antes de ejecutar
+la etapa; el catálogo y el contexto del proyecto se mantienen alineados con el
+perfil disponible.
 
 ### UI explícita en los metadatos del run
 
