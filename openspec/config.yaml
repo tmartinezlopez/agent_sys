@@ -1,18 +1,20 @@
 schema: spec-driven
 
 context: |
-  Runtime operativo Bash/Python inspirado en rburgosm/agentic-system.
+  Runtime operativo Bash/Python para la metodología de trabajo del proyecto.
   La entrada publica prevista vive en scripts/pipeline/ y el ciclo de vida
   crea un worktree y una rama feature/<item> antes de lanzar agentes.
   El runtime usa procesos externos de Codex CLI mediante `codex exec`; no usa
-  la API de OpenAI. Codex CLI local: 0.149.1. tmux local: 3.6.
+  la API de OpenAI. Codex CLI local: 0.150.1. tmux local: 3.6.
   La ejecucion debe ser observable y persistente en .pipeline/runs/<run_id>
   mediante run.json, events.jsonl, estado derivado, summary.json y artefactos
   por etapa.
-  El pipeline final declara exactamente estos roles: spec-writer, implementer,
-  test-runner, reviewer, ui-reviewer y qa. Sus modelos son, respectivamente,
-  gpt-5.6-luna, gpt-5.4, gpt-5.6-luna, gpt-5.6-luna, gpt-5.4 y gpt-5.4.
-  test-runner usa razonamiento high; los demás usan medium. No se deben
+  El coordinador principal mantiene la visión global del proyecto, lanza y
+  supervisa los agentes y decide cuándo avanzar. El pipeline final declara
+  exactamente estos roles subordinados: spec-writer, implementer,
+  test-runner, reviewer, ui-reviewer y qa. Todos usan gpt-5.6-luna.
+  spec-writer, test-runner y reviewer usan
+  razonamiento medium; implementer, ui-reviewer y qa usan low. No se deben
   introducir roles genericos ni configuraciones ficticias en produccion.
   No publicar cambios en GitHub salvo orden explicita del operador.
 

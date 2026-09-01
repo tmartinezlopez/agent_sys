@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -105,8 +106,12 @@ def state_from(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, A
     applicable = [stage for stage in STAGES
                   if stage != "ui-reviewer" or bool(run.get("ui", False))]
     statuses = {task["status"] for task in tasks.values()}
-    pending_gates = [gate for gate in gates.values() if gate["status"] == "pending"]
-    if anomalies or pending_gates:
+    pending_gates = [gate for gate in gates.values()
+                     if gate["status"] in ("pending", "changes_requested")]
+    rejected_gates = [gate for gate in gates.values() if gate["status"] == "rejected"]
+    if rejected_gates:
+        status = "discarded"
+    elif anomalies or pending_gates:
         status = "blocked"
     elif (all(next((task.get("status") for task in tasks.values()
                     if task.get("role") == stage), None) == "completed"
@@ -125,7 +130,8 @@ def state_from(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, A
         "gates": list(gates.values()),
         "ui": bool(run.get("ui", False)),
         "applicableStages": applicable,
-        "readyForReview": gates.get(RELEASE_GATE, {}).get("status") == "pending",
+        "readyForReview": gates.get(RELEASE_GATE, {}).get("status") in
+        ("pending", "changes_requested"),
         "anomalies": anomalies,
         "eventCount": len(events),
     }
@@ -174,9 +180,13 @@ def append_event(run_id: str, event_type: str, emitter: str, payload: dict[str, 
     event = {"runId": run_id, "timestamp": now(), "type": event_type,
              "emitter": emitter, **payload}
     with events_path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            stream.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def command_event(args: argparse.Namespace) -> None:
@@ -244,7 +254,7 @@ def resume_plan(run_id: str, run: dict[str, Any], events: list[dict[str, Any]]) 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "event", "show", "summary", "rebuild", "resume-plan"):
+    for name in ("init", "event", "show", "summary", "rebuild", "resume-plan", "dispatch-check"):
         command = sub.add_parser(name)
         command.add_argument("run_id")
         command.add_argument("--worktree")
@@ -258,7 +268,8 @@ def parser() -> argparse.ArgumentParser:
                                       "show": lambda a: print(json.dumps(rebuild(a.run_id, a.worktree), indent=2)),
                                       "summary": command_summary,
                                       "rebuild": lambda a: print(json.dumps(rebuild(a.run_id, a.worktree), indent=2)),
-                                      "resume-plan": command_resume_plan}[name])
+                                      "resume-plan": command_resume_plan,
+                                      "dispatch-check": command_dispatch_check}[name])
     return result
 
 
@@ -281,6 +292,24 @@ def command_resume_plan(args: argparse.Namespace) -> None:
         raise SystemExit(f"run no encontrado: {args.run_id}")
     print(json.dumps(resume_plan(args.run_id, read_json(run_path), load_events(events_path)),
                      ensure_ascii=False, indent=2))
+
+
+def command_dispatch_check(args: argparse.Namespace) -> None:
+    limit_raw = os.environ.get("PIPELINE_MAX_DISPATCHES")
+    if limit_raw is None:
+        return
+    try:
+        limit = int(limit_raw)
+    except ValueError as exc:
+        raise SystemExit("PIPELINE_MAX_DISPATCHES debe ser un entero") from exc
+    if limit < 1:
+        raise SystemExit("PIPELINE_MAX_DISPATCHES debe ser >= 1")
+    _, run_path, events_path, _ = run_paths(args.run_id, args.worktree)
+    if not run_path.exists():
+        raise SystemExit(f"run no encontrado: {args.run_id}")
+    count = sum(event.get("type") == "dispatched" for event in load_events(events_path))
+    if count >= limit:
+        raise SystemExit(f"presupuesto de despachos agotado: {count}/{limit}")
 
 
 if __name__ == "__main__":

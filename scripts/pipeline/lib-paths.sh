@@ -3,7 +3,7 @@
 # colaterales: no ejecuta Git, no cambia el directorio y no crea ficheros.
 
 _pipeline_paths_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$_pipeline_paths_dir/../.." && pwd)"
+repo_root="${PIPELINE_REPO_ROOT:-$(cd "$_pipeline_paths_dir/../.." && pwd)}"
 repo_name="$(basename "$repo_root")"
 worktrees_dir="${PIPELINE_WORKTREES_DIR:-$(dirname "$repo_root")/${repo_name}-features}"
 unset _pipeline_paths_dir

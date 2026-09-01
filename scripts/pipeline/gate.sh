@@ -25,7 +25,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "$gate_id" in gate_spec|gate_release) ;; *) echo "gate inválido: $gate_id" >&2; exit 1 ;; esac
 state="$(python3 "$script_dir/run-ledger.py" show "$run_id" --worktree "$worktree")"
 gate_status="$(python3 -c "import json,sys; s=json.load(sys.stdin); print(next((g['status'] for g in s['gates'] if g['gateId'] == '$gate_id'), 'not_opened'))" <<<"$state")"
-[ "$gate_status" = pending ] || { echo "$gate_id ya está decidido: $gate_status" >&2; exit 1; }
+case "$gate_status" in
+  pending|changes_requested) ;;
+  *) echo "$gate_id ya está decidido: $gate_status" >&2; exit 1 ;;
+esac
 task_id="spec-writer-1"
 [ "$gate_id" = gate_release ] && task_id="qa-1"
 payload="$(python3 - "$gate_id" "$task_id" "$operator" "$reason" <<'PY'

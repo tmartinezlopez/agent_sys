@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 STAGES = ("spec-writer", "implementer", "test-runner", "reviewer", "ui-reviewer", "qa")
@@ -23,7 +24,8 @@ def main() -> None:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--worktree", required=True)
     args = parser.parse_args()
-    roles = json.loads((Path(__file__).parent / "roles.json").read_text(encoding="utf-8"))
+    roles_path = Path(os.environ.get("PIPELINE_ROLES_FILE", Path(__file__).parent / "roles.json"))
+    roles = json.loads(roles_path.read_text(encoding="utf-8"))
     if args.role not in roles or args.role not in STAGES:
         fail(f"rol no declarado: {args.role}")
     if roles[args.role].get("sandbox") != EXPECTED_SANDBOX[args.role]:

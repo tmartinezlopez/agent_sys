@@ -30,6 +30,9 @@ done
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 worktree="$(cd "$worktree" && pwd)"
 [ -d "$worktree/.git" ] || [ -f "$worktree/.git" ] || { echo "no es un checkout Git: $worktree" >&2; exit 1; }
+preflight_args=("$script_dir/preflight.sh" --worktree "$worktree")
+[ "$(basename "$codex_command")" = codex ] && preflight_args+=(--real)
+"${preflight_args[@]}" >/dev/null
 timestamp="$(date -u +%Y%m%d-%H%M%S)"
 run_id="${run_id:-run_${item}_${timestamp}_$$}"
 change_name="agent-sys-${item}-${timestamp}-$$"
@@ -37,14 +40,22 @@ run_dir="$worktree/.pipeline/runs/$run_id"
 stage_dir="$run_dir/stages/spec-writer"
 mkdir -p "$stage_dir"
 
+if ! python3 "$script_dir/run-ledger.py" dispatch-check "$run_id" \
+    --worktree "$worktree"; then
+  echo "no se puede iniciar el run: presupuesto de despachos agotado" >&2
+  exit 1
+fi
+
 init_args=(python3 "$script_dir/run-ledger.py" init "$run_id" --worktree "$worktree")
 [ "$ui" -eq 1 ] && init_args+=(--ui)
 "${init_args[@]}"
-python3 - "$stage_dir/prompt.md" "$change_name" "$objective" <<'PY'
+python3 - "$stage_dir/prompt.md" "$change_name" "$objective" "$script_dir" <<'PY'
 from pathlib import Path
 import sys
-path, change, objective = sys.argv[1:]
+path, change, objective, script_dir = sys.argv[1:]
+guide = Path(script_dir).parents[1] / "GUIA-USO.md"
 Path(path).write_text(f'''Rol: spec-writer
+Antes de actuar, lee las instrucciones de {guide} si existe.
 Objetivo del run: {objective}
 Nombre exacto del change: {change}
 
@@ -61,19 +72,18 @@ Después resume artefactos y validación.
 ''', encoding="utf-8")
 PY
 
-payload="$(python3 - "$run_id" "$stage_dir" <<'PY'
-import json, sys
-print(json.dumps({"taskId":"spec-writer-1", "role":"spec-writer", "stageDir":sys.argv[2]}))
-PY
-)"
-python3 "$script_dir/run-ledger.py" event "$run_id" dispatched --emitter runtime \
-  --worktree "$worktree" --payload "$payload"
-
-run_args=(python3 "$script_dir/codex-run.py" --role spec-writer --prompt-file "$stage_dir/prompt.md"
-  --worktree "$worktree" --output-dir "$stage_dir" --run-id "$run_id"
-  --codex-command "$codex_command")
+run_args=("$script_dir/roles/launch-spec-writer.sh" "$run_id"
+  --worktree "$worktree" --change "$change_name" --codex-command "$codex_command")
 [ -n "$timeout" ] && run_args+=(--timeout "$timeout")
-"${run_args[@]}" >/dev/null
+real_codex=0
+[ "$(basename "$codex_command")" = codex ] && real_codex=1
+if [ "$real_codex" -eq 1 ]; then
+  PIPELINE_PRESERVE_PROMPT=1 "${run_args[@]}" --tmux \
+    --tmux-session "$(basename "$worktree")-coordinator" >/dev/null
+  echo "GATE_PENDING run_id=$run_id worktree=$worktree"
+  exit 2
+fi
+PIPELINE_PRESERVE_PROMPT=1 "${run_args[@]}" >/dev/null
 
 result_payload="$(python3 - "$stage_dir/result.json" "$change_name" <<'PY'
 import json, sys

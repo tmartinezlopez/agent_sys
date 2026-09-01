@@ -34,6 +34,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-paths.sh
 source "$script_dir/lib-paths.sh"
 
+preflight_args=("$script_dir/preflight.sh" --worktree "$repo_root")
+[ "$(basename "$codex_command")" = codex ] && preflight_args+=(--real)
+"${preflight_args[@]}" >/dev/null
+
 worktree_path="$(pl_worktree_path "$item")"
 branch="$(pl_branch "$item")"
 if [ -e "$worktree_path" ]; then
@@ -51,7 +55,7 @@ if [ -z "$objective" ]; then
   exit 0
 fi
 
-pipeline="$worktree_path/scripts/pipeline/run-pipeline.sh"
+pipeline="$script_dir/run-pipeline.sh"
 command=("$pipeline" "$item" "$objective" --worktree "$worktree_path"
          --codex-command "$codex_command")
 [ "$ui" -eq 1 ] && command+=(--ui)
@@ -71,4 +75,4 @@ if [ "$no_tmux" -eq 0 ] && command -v tmux >/dev/null 2>&1; then
 fi
 
 echo "tmux no disponible o desactivado; ejecutando foreground"
-"${command[@]}"
+PIPELINE_SCRIPT_DIR="$script_dir" PIPELINE_REPO_ROOT="$repo_root" "${command[@]}"

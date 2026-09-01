@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="${PIPELINE_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 worktree="$(cd "$worktree" && pwd)"
 
 if [ -z "${PIPELINE_RESUME_SNAPSHOT:-}" ]; then
@@ -42,7 +42,11 @@ gate_spec="$(python3 -c "import json,sys; print(json.load(sys.stdin)['gates']['g
 resume_stage="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('resumeStage') or '')" <<<"$plan")"
 change="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('change') or '')" <<<"$plan")"
 [ "$gate_spec" = approved ] || {
-  echo "gate_spec no aprobado: $gate_spec" >&2
+  if [ "$gate_spec" = changes_requested ]; then
+    echo "GATE_PENDING gate=gate_spec run_id=$run_id: aplica los cambios y vuelve a aprobar" >&2
+  else
+    echo "gate_spec no aprobado: $gate_spec" >&2
+  fi
   exit 1
 }
 [ -n "$change" ] || {
@@ -52,7 +56,7 @@ change="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('change') 
 
 if [ "$resume_stage" = gate_release ]; then
   release_status="$(python3 -c "import json,sys; print(json.load(sys.stdin)['gates']['gate_release']['status'])" <<<"$plan")"
-  if [ "$release_status" = pending ]; then
+  if [ "$release_status" = pending ] || [ "$release_status" = changes_requested ]; then
     echo "GATE_PENDING gate=gate_release run_id=$run_id worktree=$worktree"
     exit 2
   fi
@@ -95,10 +99,28 @@ while :; do
   fi
   stage_snapshot="$worktree/.pipeline/runs/$run_id/runtime/run-stage-$resume_stage.sh"
   cp "$script_dir/run-stage.sh" "$stage_snapshot"
-  stage_args=(bash "$stage_snapshot" "$run_id" "$resume_stage"
+  role_launcher="$script_dir/roles/launch-$resume_stage.sh"
+  stage_args=(bash "$role_launcher" "$run_id"
     --worktree "$worktree" --change "$change" --codex-command "$codex_command")
   [ -n "$timeout" ] && stage_args+=(--timeout "$timeout")
-  if ! PIPELINE_SCRIPT_DIR="$script_dir" "${stage_args[@]}"; then
+  stage_tmux=0
+  [ "$(basename "$codex_command")" = codex ] && stage_tmux=1
+  if [ "$stage_tmux" -eq 1 ]; then
+    if ! PIPELINE_SCRIPT_DIR="$script_dir" PIPELINE_STAGE_ENGINE="$stage_snapshot" \
+      "${stage_args[@]}" --tmux --tmux-session "$(basename "$worktree")-coordinator"; then
+      echo "stage failed: $resume_stage run_id=$run_id" >&2
+      exit 1
+    fi
+    while :; do
+      task_status="$(python3 "$script_dir/run-ledger.py" show "$run_id" --worktree "$worktree" |
+        python3 -c "import json,sys; s=json.load(sys.stdin); print(next((t.get('status','') for t in s.get('tasks',[]) if t.get('role') == '$resume_stage'), ''))")"
+      case "$task_status" in
+        completed) break ;;
+        failed) echo "stage failed: $resume_stage run_id=$run_id" >&2; exit 1 ;;
+      esac
+      sleep 1
+    done
+  elif ! PIPELINE_SCRIPT_DIR="$script_dir" PIPELINE_STAGE_ENGINE="$stage_snapshot" "${stage_args[@]}"; then
     echo "stage failed: $resume_stage run_id=$run_id" >&2
     exit 1
   fi
