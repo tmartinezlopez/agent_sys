@@ -52,7 +52,8 @@ versión actual.
 ## Limitaciones conocidas
 
 - No existe todavía una operación automática de `ship-feature`.
-- No hay caché explícita de prompts ni contador de tokens del modelo; sí hay
-  reanudación sin repetir etapas completadas y límite de despachos.
+- La caché de resultados read-only está disponible de forma opt-in y el uso de
+  tokens se registra cuando Codex lo proporciona. Sí hay reanudación sin
+  repetir etapas completadas y límites de despachos/tokens opcionales.
 - El coordinador principal debe leer `GUIA-USO.md` antes de operar la
   metodología.

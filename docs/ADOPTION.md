@@ -1,5 +1,9 @@
 # Adopción en otro proyecto
 
+Esta guía cubre la instalación inicial. Para actualizar una instalación ya
+existente, consulta [UPDATING.md](UPDATING.md); para adaptar los comandos del
+proyecto, consulta [PROJECT-CONTRACT.md](PROJECT-CONTRACT.md).
+
 ## Requisitos
 
 - Checkout Git con una rama base disponible.
@@ -27,8 +31,6 @@ Añadir al `.gitignore` del consumidor:
 
 ```gitignore
 .pipeline/*
-!.pipeline/toolchain/
-!.pipeline/toolchain/**
 ```
 
 ## Ejecución segura

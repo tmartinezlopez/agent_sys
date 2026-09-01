@@ -11,7 +11,5 @@ env/
 !.env.example
 runs/
 .pipeline/*
-!.pipeline/toolchain/
-!.pipeline/toolchain/**
 *.log
 .DS_Store

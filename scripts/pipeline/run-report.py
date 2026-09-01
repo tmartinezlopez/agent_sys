@@ -33,7 +33,7 @@ def load_result(event: dict[str, Any], run_dir: Path) -> dict[str, Any] | None:
         return None
     return {
         key: result.get(key)
-        for key in ("status", "exitCode", "role", "command", "error")
+        for key in ("status", "exitCode", "role", "command", "error", "usage", "cacheDecision")
         if key in result
     }
 
@@ -78,6 +78,7 @@ def build_report(run_dir: Path, run_id: str) -> dict[str, Any]:
         "gates": state["gates"],
         "stages": list(stages.values()),
         "anomalies": state["anomalies"],
+        "tokenUsage": state.get("tokenUsage", {"totalTokens": 0, "unknownStages": 0}),
     }
 
 

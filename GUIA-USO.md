@@ -1,5 +1,9 @@
 # Guía de uso de la metodología
 
+Documentos relacionados: [arquitectura](docs/ARCHITECTURE.md),
+[flujo del pipeline](docs/PIPELINE.md), [adopción](docs/ADOPTION.md),
+[actualización](docs/UPDATING.md) y [contrato del proyecto](docs/PROJECT-CONTRACT.md).
+
 Esta carpeta se copia dentro de cada proyecto con el nombre `metodologia/`.
 No se instala como una aplicación ni se mezcla con el código del proyecto.
 
@@ -69,8 +73,6 @@ Añade al `.gitignore`:
 
 ```gitignore
 .pipeline/*
-!.pipeline/toolchain/
-!.pipeline/toolchain/**
 ```
 
 Haz un commit del proyecto y de `metodologia/` antes de usarla.
@@ -228,3 +230,12 @@ Las pruebas normales usan un agente falso y no consumen cuota. Codex real se
 lanza sólo para implementar una funcionalidad, siempre con límite explícito y
 revisión humana. La reanudación reutiliza el `RUN_ID` y no repite etapas
 completadas.
+
+La caché de resultados read-only está desactivada por defecto. Sólo se activa
+de forma explícita con `PIPELINE_PROMPT_CACHE_MODE=read-write`; sus decisiones
+quedan en `result.json`, `run-report.py` y `run-logs.py`. No cachea roles que
+escriben en el checkout.
+
+El contador de tokens se activa con `PIPELINE_MAX_TOKENS=<entero>`. El runtime
+registra el uso conocido por etapa y run; las métricas que Codex no proporcione
+quedan como `unknown`.

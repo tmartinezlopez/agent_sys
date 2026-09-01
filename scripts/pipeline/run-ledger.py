@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import importlib.util
 import json
 import os
 import re
@@ -16,6 +17,11 @@ from typing import Any
 STAGES = ("spec-writer", "implementer", "test-runner", "reviewer", "ui-reviewer", "qa")
 SPEC_GATE = "gate_spec"
 RELEASE_GATE = "gate_release"
+USAGE_SPEC = importlib.util.spec_from_file_location("token_usage", Path(__file__).with_name("token-usage.py"))
+if USAGE_SPEC is None or USAGE_SPEC.loader is None:
+    raise SystemExit("no se pudo cargar token-usage.py")
+token_usage = importlib.util.module_from_spec(USAGE_SPEC)
+USAGE_SPEC.loader.exec_module(token_usage)
 
 
 def now() -> str:
@@ -109,6 +115,8 @@ def state_from(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, A
     pending_gates = [gate for gate in gates.values()
                      if gate["status"] in ("pending", "changes_requested")]
     rejected_gates = [gate for gate in gates.values() if gate["status"] == "rejected"]
+    usage_events = [event for event in events if event.get("type") in ("completed", "failed")]
+    token_total, unknown_usage = token_usage.total_for(usage_events)
     if rejected_gates:
         status = "discarded"
     elif anomalies or pending_gates:
@@ -134,6 +142,7 @@ def state_from(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, A
         ("pending", "changes_requested"),
         "anomalies": anomalies,
         "eventCount": len(events),
+        "tokenUsage": {"totalTokens": token_total, "unknownStages": unknown_usage},
     }
 
 
@@ -277,7 +286,8 @@ def command_summary(args: argparse.Namespace) -> None:
     state = rebuild(args.run_id, args.worktree)
     root, _, _, _ = run_paths(args.run_id, args.worktree)
     summary = {key: state[key] for key in ("runId", "status", "eventCount", "tasks", "gates",
-                                           "ui", "applicableStages", "readyForReview", "anomalies")}
+                                           "ui", "applicableStages", "readyForReview", "anomalies",
+                                           "tokenUsage")}
     summary["generatedAt"] = now()
     atomic_write(root / "summary.json", summary)
     pointer = pointer_path(args.worktree)
@@ -296,20 +306,33 @@ def command_resume_plan(args: argparse.Namespace) -> None:
 
 def command_dispatch_check(args: argparse.Namespace) -> None:
     limit_raw = os.environ.get("PIPELINE_MAX_DISPATCHES")
-    if limit_raw is None:
-        return
-    try:
-        limit = int(limit_raw)
-    except ValueError as exc:
-        raise SystemExit("PIPELINE_MAX_DISPATCHES debe ser un entero") from exc
-    if limit < 1:
-        raise SystemExit("PIPELINE_MAX_DISPATCHES debe ser >= 1")
     _, run_path, events_path, _ = run_paths(args.run_id, args.worktree)
     if not run_path.exists():
         raise SystemExit(f"run no encontrado: {args.run_id}")
-    count = sum(event.get("type") == "dispatched" for event in load_events(events_path))
-    if count >= limit:
-        raise SystemExit(f"presupuesto de despachos agotado: {count}/{limit}")
+    events = load_events(events_path)
+    if limit_raw is not None:
+        try:
+            limit = int(limit_raw)
+        except ValueError as exc:
+            raise SystemExit("PIPELINE_MAX_DISPATCHES debe ser un entero") from exc
+        if limit < 1:
+            raise SystemExit("PIPELINE_MAX_DISPATCHES debe ser >= 1")
+        count = sum(event.get("type") == "dispatched" for event in events)
+        if count >= limit:
+            raise SystemExit(f"presupuesto de despachos agotado: {count}/{limit}")
+    token_limit_raw = os.environ.get("PIPELINE_MAX_TOKENS")
+    if token_limit_raw is None:
+        return
+    try:
+        token_limit = int(token_limit_raw)
+    except ValueError as exc:
+        raise SystemExit("PIPELINE_MAX_TOKENS debe ser un entero") from exc
+    if token_limit < 1:
+        raise SystemExit("PIPELINE_MAX_TOKENS debe ser >= 1")
+    token_total, _ = token_usage.total_for(
+        event for event in events if event.get("type") in ("completed", "failed"))
+    if token_total >= token_limit:
+        raise SystemExit(f"presupuesto de tokens agotado: {token_total}/{token_limit}")
 
 
 if __name__ == "__main__":

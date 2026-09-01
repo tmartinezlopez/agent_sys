@@ -42,7 +42,7 @@ def _stage_logs(run_dir: Path, stage_filter: str | None) -> list[dict[str, str]]
     for stage_dir in sorted(path for path in stages_dir.iterdir() if path.is_dir()):
         if stage_filter and stage_dir.name != stage_filter:
             continue
-        for name in ("prompt.md", "stdout.log", "stderr.log"):
+        for name in ("prompt.md", "stdout.log", "stderr.log", "result.json"):
             path = stage_dir / name
             if path.exists():
                 result.append({

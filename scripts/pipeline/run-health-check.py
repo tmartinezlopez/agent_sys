@@ -82,6 +82,7 @@ def run_report(run_dir: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | N
                          if task.get("status") == "failed"],
         "readyForReview": state.get("readyForReview", False),
         "anomalies": len(state.get("anomalies", [])),
+        "tokenUsage": state.get("tokenUsage", {"totalTokens": 0, "unknownStages": 0}),
     }
 
     finding = None

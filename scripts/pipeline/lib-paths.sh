@@ -20,15 +20,6 @@ pl_window() { # <item>
   printf 'pl:%s\n' "$1"
 }
 
-pl_run_root() { # <worktree> [run_id]
-  local worktree="$1"
-  if [ "${2-}" ]; then
-    printf '%s\n' "$worktree/.pipeline/runs/$2"
-  else
-    printf '%s\n' "$worktree/.pipeline/runs"
-  fi
-}
-
 pl_window_id_file() { # <item>
   printf '%s\n' "$(pl_worktree_path "$1")/.pipeline/window-id"
 }

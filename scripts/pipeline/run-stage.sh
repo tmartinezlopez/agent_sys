@@ -35,7 +35,7 @@ if ! budget_error="$(python3 "$script_dir/run-ledger.py" dispatch-check "$run_id
 import json, sys
 role, reason = sys.argv[1:]
 print(json.dumps({"role": role, "reason": reason, "stage": role,
-                  "kind": "dispatch_budget_exhausted"}))
+                  "kind": "token_budget_exhausted" if "tokens" in reason else "dispatch_budget_exhausted"}))
 PY
 )"
   python3 "$script_dir/run-ledger.py" event "$run_id" anomaly --emitter runtime \
@@ -128,7 +128,8 @@ result_path, role, stage_dir, change = sys.argv[1:]
 result = json.load(open(result_path, encoding="utf-8"))
 print(json.dumps({"taskId": f"{role}-1", "role": role,
                   "stageDir": stage_dir, "resultFile": result_path,
-                  "exitCode": result.get("exitCode"), "change": change or None}))
+                  "exitCode": result.get("exitCode"), "usage": result.get("usage"),
+                  "change": change or None}))
 PY
 )"
 if python3 - "$stage_dir/result.json" <<'PY'

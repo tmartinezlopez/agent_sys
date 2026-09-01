@@ -38,6 +38,7 @@ tmux new-session -d -s "$session" -n coordinator -c "$worktree" \
   env "${env_args[@]}" "$script_dir/coordinator.sh" \
   --worktree "$worktree" --codex-command "$codex_command"
 tmux set-window-option -t "$session:coordinator" automatic-rename off
+tmux set-window-option -t "$session:coordinator" remain-on-exit on
 tmux select-pane -t "$session:coordinator" -T "COORDINATOR"
 tmux rename-window -t "$session:coordinator" "COORDINATOR"
 tmux set-option -t "$session" history-limit 10000

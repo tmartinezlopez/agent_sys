@@ -40,9 +40,9 @@ run_dir="$worktree/.pipeline/runs/$run_id"
 stage_dir="$run_dir/stages/spec-writer"
 mkdir -p "$stage_dir"
 
-if ! python3 "$script_dir/run-ledger.py" dispatch-check "$run_id" \
+if [ -f "$run_dir/run.json" ] && ! python3 "$script_dir/run-ledger.py" dispatch-check "$run_id" \
     --worktree "$worktree"; then
-  echo "no se puede iniciar el run: presupuesto de despachos agotado" >&2
+  echo "no se puede continuar el run: presupuesto agotado" >&2
   exit 1
 fi
 

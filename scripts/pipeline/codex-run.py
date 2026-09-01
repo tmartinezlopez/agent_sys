@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import selectors
@@ -16,6 +17,16 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 ROLES_PATH = ROOT / "roles.json"
 GIT_GUARD = ROOT / "git-guard.sh"
+CACHE_SPEC = importlib.util.spec_from_file_location("prompt_cache", ROOT / "prompt-cache.py")
+if CACHE_SPEC is None or CACHE_SPEC.loader is None:
+    raise SystemExit("no se pudo cargar prompt-cache.py")
+prompt_cache = importlib.util.module_from_spec(CACHE_SPEC)
+CACHE_SPEC.loader.exec_module(prompt_cache)
+USAGE_SPEC = importlib.util.spec_from_file_location("token_usage", ROOT / "token-usage.py")
+if USAGE_SPEC is None or USAGE_SPEC.loader is None:
+    raise SystemExit("no se pudo cargar token-usage.py")
+token_usage = importlib.util.module_from_spec(USAGE_SPEC)
+USAGE_SPEC.loader.exec_module(token_usage)
 
 
 def load_roles() -> dict[str, dict[str, Any]]:
@@ -35,8 +46,8 @@ def is_real_codex(command: str) -> bool:
     return Path(command).name == "codex"
 
 
-def extract_usage(stdout: str) -> dict[str, Any] | None:
-    """Extract the first usage-like object emitted by codex exec --json."""
+def extract_usage(stdout: str) -> dict[str, Any]:
+    """Extract and normalize the first usage-like object emitted by Codex."""
     for line in stdout.splitlines():
         try:
             value = json.loads(line)
@@ -47,8 +58,8 @@ def extract_usage(stdout: str) -> dict[str, Any] | None:
         for key in ("usage", "tokenUsage", "token_usage"):
             usage = value.get(key)
             if isinstance(usage, dict):
-                return usage
-    return None
+                return token_usage.normalize(usage)
+    return token_usage.unknown()
 
 
 def run_live(command: list[str], args: argparse.Namespace, environment: dict[str, str]) -> tuple[int, str, str, str | None]:
@@ -88,6 +99,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit(f"rol no declarado: {args.role}")
     role = roles[args.role]
     prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+    try:
+        cache_decision = prompt_cache.lookup(args.role, role, prompt, args.worktree)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        cache_decision = {"decision": "cache_bypass", "reason": f"cache_error:{exc.__class__.__name__}"}
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = output_dir / "stdout.log"
@@ -111,7 +126,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     error: str | None = None
     stdout = ""
     stderr = ""
-    if is_real_codex(args.codex_command) and os.environ.get("PIPELINE_ALLOW_REAL_CODEX") != "1":
+    if cache_decision.get("decision") == "cache_hit":
+        cached = cache_decision["entry"]
+        exit_code = int(cached["exitCode"])
+        error = None
+    elif is_real_codex(args.codex_command) and os.environ.get("PIPELINE_ALLOW_REAL_CODEX") != "1":
         exit_code = 126
         error = ("Codex real bloqueado por seguridad; usa un fake en pruebas o "
                  "PIPELINE_ALLOW_REAL_CODEX=1 para una ejecución explícita")
@@ -140,9 +159,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     stdout_path.write_text(stdout, encoding="utf-8")
     stderr_path.write_text(stderr, encoding="utf-8")
     usage = extract_usage(stdout)
-    if usage is not None:
-        usage_path.write_text(json.dumps(usage, ensure_ascii=False, indent=2) + "\n",
-                              encoding="utf-8")
+    usage_path.write_text(json.dumps(usage, ensure_ascii=False, indent=2) + "\n",
+                          encoding="utf-8")
     status = "passed" if exit_code == 0 else "failed"
     duration_seconds = round(time.monotonic() - started, 3)
     document = {
@@ -155,10 +173,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "command": command,
         "stdoutFile": str(stdout_path),
         "stderrFile": str(stderr_path),
-        "usageFile": str(usage_path) if usage is not None else None,
+        "usageFile": str(usage_path),
         "usage": usage,
+        "cacheDecision": {key: value for key, value in cache_decision.items() if key != "entry"},
         "gitGuard": "merge-push-blocked",
     }
+    if cache_decision.get("decision") == "cache_miss" and status == "passed":
+        document["cacheDecision"] = prompt_cache.store(cache_decision, document, args.worktree)
     result_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n",
                            encoding="utf-8")
     return document

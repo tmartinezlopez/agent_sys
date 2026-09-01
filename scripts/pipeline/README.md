@@ -25,6 +25,8 @@ tmux attach-session -t NOMBRE_DEVUELTO
 gráfico, abre automáticamente una terminal visible conectada a ella. Usa
 `--detach` para no abrirla, o `--no-open-terminal` para conectar la terminal
 actual cuando exista un TTY.
+La ventana `COORDINATOR` permanece visible si el proceso falla para que el
+error pueda inspeccionarse; las ventanas de roles sí se cierran al terminar.
 
 Para cerrar uno concreto:
 
@@ -132,8 +134,21 @@ mismos.
 Las pruebas del runtime deben usar un Codex falso determinista. Una E2E con el
 Codex real es una operación manual y excepcional, no parte de cada cambio.
 
+La caché de resultados read-only está desactivada por defecto. Para habilitarla
+usa `PIPELINE_PROMPT_CACHE_MODE=read-write`. Sólo se reutilizan resultados
+exitosos con el mismo prompt, configuración y contenido del checkout; los roles
+que escriben siempre se ejecutan de nuevo.
+
+Para invalidar manualmente sólo las entradas de caché, primero lista y después
+confirma con `--force`:
+
+```bash
+python3 scripts/pipeline/prompt-cache.py clear --worktree "$PWD"
+python3 scripts/pipeline/prompt-cache.py clear --worktree "$PWD" --force
+```
+
 La reanudación reutiliza el `run_id` y no vuelve a despachar etapas completadas.
-El runtime todavía no implementa una caché explícita de prompts ni un contador
-de tokens; esa capacidad queda pendiente antes de habilitar ejecuciones reales
-frecuentes. No se debe interpretar el almacenamiento de logs como caché de
-contexto del modelo.
+La caché no sustituye el ledger ni la reanudación y no guarda prompts ni logs.
+El uso de tokens informado por Codex queda normalizado en `usage.json`; para
+activar un límite opcional usa `PIPELINE_MAX_TOKENS=<entero>`. Si el CLI no
+informa uso, se conserva como `unknown` y no se estima silenciosamente.
